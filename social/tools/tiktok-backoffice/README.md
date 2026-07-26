@@ -54,6 +54,12 @@ uv run tiktok-backoffice ignore-review --review-id 1 --reason "hors sujet"
 
 # Inspect one review item
 uv run tiktok-backoffice review --review-id 1
+
+# Browser worker queue: oldest review approved for draft
+uv run tiktok-backoffice next-browser-draft
+
+# Browser worker result: composer filled, screenshot captured, still not posted
+uv run tiktok-backoffice browser-drafted --review-id 1 --screenshot-path /opt/data/browser_screenshots/draft.png
 ```
 
 `draft` records a draft locally and returns the exact text to review. It does
@@ -98,3 +104,14 @@ Review decisions are separate from publishing:
   pending queue.
 - Publishing will require a later explicit `approved_for_publish` state and a
   separate guarded command; it is intentionally not implemented here.
+
+Browser worker integration contract:
+
+- `next-browser-draft` returns only review items already approved by the
+  operator with `approve-draft`.
+- A browser worker may use the returned `video_url`, `author`, `comment_text`,
+  and `reply_text` to fill TikTok's reply composer.
+- After filling the composer, the worker must call `browser-drafted` with a
+  screenshot path. This records `drafted_in_browser` and a browser event.
+- `browser-drafted` still means **not posted**. There is intentionally no publish
+  command in this increment.

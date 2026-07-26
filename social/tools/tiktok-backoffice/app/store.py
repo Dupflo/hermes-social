@@ -129,6 +129,61 @@ class TikTokBackofficeStore:
         return {"matched": len(matched_comment_ids), "created_drafts": created}
 
 
+
+    def next_browser_draft_item(self) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    ri.id,
+                    ri.comment_id,
+                    ri.campaign_slug,
+                    ri.matched_keyword,
+                    ri.reply_text,
+                    ri.status,
+                    ri.screenshot_path,
+                    ri.failure_reason,
+                    ri.created_at,
+                    c.video_url,
+                    c.video_id,
+                    c.author,
+                    c.text AS comment_text
+                FROM tiktok_review_items ri
+                JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+                WHERE ri.status = ?
+                ORDER BY ri.updated_at ASC, ri.id ASC
+                LIMIT 1
+                """,
+                (ReviewItemStatus.APPROVED_FOR_DRAFT,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def mark_review_browser_drafted(self, review_id: int, *, screenshot_path: str | None = None) -> dict:
+        item = self.get_review_item(review_id)
+        if item is None:
+            raise KeyError(f"Unknown review_id: {review_id}")
+        if item["status"] != ReviewItemStatus.APPROVED_FOR_DRAFT:
+            raise ValueError(f"review_id {review_id} is not approved_for_draft")
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE tiktok_review_items
+                SET status = ?, screenshot_path = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (ReviewItemStatus.DRAFTED_IN_BROWSER, screenshot_path, review_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO tiktok_browser_events (video_url, event_type, screenshot_path)
+                VALUES (?, ?, ?)
+                """,
+                (item["video_url"], "browser_draft_filled_not_posted", screenshot_path),
+            )
+        updated = self.get_review_item(review_id)
+        assert updated is not None
+        return updated
+
     def get_review_item(self, review_id: int) -> dict | None:
         with self._connect() as connection:
             row = connection.execute(

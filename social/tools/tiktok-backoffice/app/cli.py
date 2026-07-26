@@ -56,6 +56,12 @@ def build_parser() -> argparse.ArgumentParser:
     review = sub.add_parser("review")
     review.add_argument("--review-id", type=int, required=True)
 
+    sub.add_parser("next-browser-draft")
+
+    browser_drafted = sub.add_parser("browser-drafted")
+    browser_drafted.add_argument("--review-id", type=int, required=True)
+    browser_drafted.add_argument("--screenshot-path")
+
     sub.add_parser("browser-events")
     sub.add_parser("next")
     list_cmd = sub.add_parser("list")
@@ -130,6 +136,14 @@ def run(argv: list[str] | None = None) -> str:
 
     if args.command == "review":
         return json.dumps({"ok": True, "item": store.get_review_item(args.review_id)}, ensure_ascii=False)
+
+
+    if args.command == "next-browser-draft":
+        return json.dumps({"ok": True, "item": store.next_browser_draft_item()}, ensure_ascii=False)
+
+    if args.command == "browser-drafted":
+        store.mark_review_browser_drafted(args.review_id, screenshot_path=args.screenshot_path)
+        return json.dumps({"ok": True, "review_id": args.review_id, "status": ReviewItemStatus.DRAFTED_IN_BROWSER}, ensure_ascii=False)
 
     if args.command == "browser-events":
         return json.dumps({"ok": True, "items": store.recent_browser_events()}, ensure_ascii=False)
