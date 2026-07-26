@@ -101,6 +101,14 @@ uv run tiktok-backoffice assign-video \
 
 # Inspect videos and campaign links
 uv run tiktok-backoffice list-videos --with-campaigns
+
+# Suggest campaign links from video captions and active campaign keywords
+uv run tiktok-backoffice suggest-video-campaigns
+
+# Approve a suggested video/campaign link for polling
+uv run tiktok-backoffice approve-video-campaign \
+  --video-url 'https://www.tiktok.com/@dupflodev/video/123' \
+  --campaign proxy
 ```
 
 `assign-video` is idempotent. Future automatic discovery can fill this same
@@ -150,3 +158,14 @@ reply examples should say that the link was sent privately, e.g.
 `Je viens de t’envoyer le lien en message privé`. If the intended private/public
 reply flow is blocked, surface the item to Hermes/Kanban for explicit operator
 approval instead of inventing a fallback.
+
+Suggested video/campaign links:
+
+- `suggest-video-campaigns` scans active videos with captions against active
+  campaign keywords.
+- Suggestions are stored as `source=caption_keyword`, `confidence=0.8`,
+  `approved=0`; they are not used as trusted campaign mappings until approved.
+- `approve-video-campaign` promotes a suggestion to `source=operator_approved`,
+  `confidence=1.0`, `approved=1`.
+- Manual `assign-video --source manual` remains available when the operator knows
+  the exact TikTok video for a campaign.

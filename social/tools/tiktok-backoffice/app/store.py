@@ -69,6 +69,70 @@ class TikTokBackofficeStore:
                     item["campaigns"] = [dict(row) for row in campaign_rows]
         return items
 
+
+    def suggest_video_campaigns(self) -> int:
+        suggested = 0
+        with self._connect() as connection:
+            videos = connection.execute(
+                "SELECT video_url, caption FROM tiktok_videos WHERE active = 1 ORDER BY discovered_at DESC"
+            ).fetchall()
+            campaigns = connection.execute("SELECT slug FROM tiktok_campaigns WHERE active = 1 ORDER BY slug").fetchall()
+            for video in videos:
+                caption = video["caption"] or ""
+                if not caption.strip():
+                    continue
+                for campaign_row in campaigns:
+                    campaign = self.get_campaign(campaign_row["slug"])
+                    if campaign is None:
+                        continue
+                    if any(contains_keyword(caption, keyword) for keyword in campaign["keywords"]):
+                        cursor = connection.execute(
+                            """
+                            INSERT INTO tiktok_video_campaigns (video_url, campaign_slug, source, confidence, approved)
+                            VALUES (?, ?, ?, ?, ?)
+                            ON CONFLICT(video_url, campaign_slug) DO NOTHING
+                            """,
+                            (video["video_url"], campaign["slug"], "caption_keyword", 0.8, 0),
+                        )
+                        suggested += cursor.rowcount
+        return suggested
+
+    def approve_video_campaign(self, *, video_url: str, campaign_slug: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE tiktok_video_campaigns
+                SET approved = 1,
+                    source = 'operator_approved',
+                    confidence = 1.0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE video_url = ? AND campaign_slug = ?
+                  AND (approved != 1 OR source != 'operator_approved' OR confidence != 1.0)
+                """,
+                (video_url, campaign_slug),
+            )
+            if cursor.rowcount == 0:
+                existing = connection.execute(
+                    "SELECT 1 FROM tiktok_video_campaigns WHERE video_url = ? AND campaign_slug = ?",
+                    (video_url, campaign_slug),
+                ).fetchone()
+                if existing is None:
+                    video = connection.execute("SELECT 1 FROM tiktok_videos WHERE video_url = ?", (video_url,)).fetchone()
+                    if video is None:
+                        raise KeyError(f"Unknown video_url: {video_url}")
+                    campaign = connection.execute("SELECT 1 FROM tiktok_campaigns WHERE slug = ?", (campaign_slug,)).fetchone()
+                    if campaign is None:
+                        raise KeyError(f"Unknown campaign: {campaign_slug}")
+                    insert_cursor = connection.execute(
+                        """
+                        INSERT INTO tiktok_video_campaigns (video_url, campaign_slug, source, confidence, approved)
+                        VALUES (?, ?, 'operator_approved', 1.0, 1)
+                        """,
+                        (video_url, campaign_slug),
+                    )
+                    return insert_cursor.rowcount > 0
+        return cursor.rowcount > 0
+
     def assign_video_campaign(self, *, video_url: str, campaign_slug: str, source: str = "manual", confidence: float = 1.0, approved: bool = True) -> bool:
         with self._connect() as connection:
             video = connection.execute("SELECT 1 FROM tiktok_videos WHERE video_url = ?", (video_url,)).fetchone()

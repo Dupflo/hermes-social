@@ -32,6 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     assign_video.add_argument("--source", default="manual")
     assign_video.add_argument("--confidence", type=float, default=1.0)
 
+    sub.add_parser("suggest-video-campaigns")
+
+    approve_video_campaign = sub.add_parser("approve-video-campaign")
+    approve_video_campaign.add_argument("--video-url", required=True)
+    approve_video_campaign.add_argument("--campaign", required=True)
+
     add = sub.add_parser("add-comment")
     add.add_argument("--video-url", required=True)
     add.add_argument("--video-id")
@@ -102,6 +108,14 @@ def run(argv: list[str] | None = None) -> str:
 
     if args.command == "assign-video":
         changed = store.assign_video_campaign(video_url=args.video_url, campaign_slug=args.campaign, source=args.source, confidence=args.confidence)
+        return json.dumps({"ok": True, "changed": changed}, ensure_ascii=False)
+
+
+    if args.command == "suggest-video-campaigns":
+        return json.dumps({"ok": True, "suggested": store.suggest_video_campaigns()}, ensure_ascii=False)
+
+    if args.command == "approve-video-campaign":
+        changed = store.approve_video_campaign(video_url=args.video_url, campaign_slug=args.campaign)
         return json.dumps({"ok": True, "changed": changed}, ensure_ascii=False)
 
     if args.command == "add-comment":
