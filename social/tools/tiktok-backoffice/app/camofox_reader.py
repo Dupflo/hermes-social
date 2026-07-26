@@ -245,6 +245,7 @@ _COMMENT_EXTRACTION_JS = r'''
       .replace(/\s+(?:\d+[smhdw]|\d+-\d+|Yesterday|Today)\s+ago\s+Reply(?:\s+\d+)?(?:\s+View\s+\d+\s+repl(?:y|ies))?\s*$/i, '')
       .replace(/\s+Reply(?:\s+\d+)?(?:\s+View\s+\d+\s+repl(?:y|ies))?\s*$/i, '')
       .replace(/\s+View\s+\d+\s+repl(?:y|ies)\s*$/i, '')
+      .replace(/\s+\d{1,2}-\d{1,2}\s*$/i, '')
     );
     return txt;
   }

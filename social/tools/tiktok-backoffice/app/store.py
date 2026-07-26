@@ -42,6 +42,10 @@ def _comment_fingerprint(*, video_url: str, author: str | None, text: str, creat
     return "fp:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
 
+def _normalize_comment_text(text: str) -> str:
+    return re.sub(r"\s+\d{1,2}-\d{1,2}$", "", text).strip()
+
+
 class TikTokBackofficeStore:
     def __init__(self, database: str | Path):
         self.database = Path(database)
@@ -273,7 +277,7 @@ class TikTokBackofficeStore:
                 )
 
             for raw in comments:
-                text = str(raw.get("text") or raw.get("comment") or "").strip()
+                text = _normalize_comment_text(str(raw.get("text") or raw.get("comment") or "").strip())
                 if not text:
                     continue
                 author = raw.get("author") or raw.get("username") or raw.get("user")
