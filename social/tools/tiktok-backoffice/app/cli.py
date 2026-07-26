@@ -27,6 +27,11 @@ def build_parser() -> argparse.ArgumentParser:
     draft.add_argument("--keyword", required=True)
     draft.add_argument("--reply", required=True)
 
+    captcha = sub.add_parser("captcha-needed")
+    captcha.add_argument("--video-url", required=True)
+    captcha.add_argument("--screenshot-path")
+
+    sub.add_parser("browser-events")
     sub.add_parser("next")
     list_cmd = sub.add_parser("list")
     list_cmd.add_argument("--limit", type=int, default=20)
@@ -52,6 +57,20 @@ def run(argv: list[str] | None = None) -> str:
             return json.dumps({"ok": False, "error": "publishing_not_implemented"}, ensure_ascii=False)
         store.save_draft(ReplyDraft(comment_id=args.comment_id, keyword=args.keyword, reply_text=args.reply))
         return json.dumps({"ok": True, "mode": "draft_only", "comment_id": args.comment_id, "reply_text": args.reply, "message": "Draft saved locally only; nothing was posted to TikTok."}, ensure_ascii=False)
+
+    if args.command == "captcha-needed":
+        store.mark_needs_manual_captcha(video_url=args.video_url, screenshot_path=args.screenshot_path)
+        return json.dumps(
+            {
+                "ok": True,
+                "status": "needs_manual_captcha",
+                "message": "TikTok showed a slider CAPTCHA; solve it manually via Camofox/noVNC before browser drafting.",
+            },
+            ensure_ascii=False,
+        )
+
+    if args.command == "browser-events":
+        return json.dumps({"ok": True, "items": store.recent_browser_events()}, ensure_ascii=False)
 
     if args.command == "next":
         return json.dumps({"ok": True, "item": store.next_pending()}, ensure_ascii=False)

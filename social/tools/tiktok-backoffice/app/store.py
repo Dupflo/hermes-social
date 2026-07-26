@@ -96,6 +96,24 @@ class TikTokBackofficeStore:
             row = connection.execute("SELECT * FROM tiktok_reply_drafts WHERE comment_id = ?", (comment_id,)).fetchone()
         return dict(row) if row else None
 
+    def mark_needs_manual_captcha(self, *, video_url: str, screenshot_path: str | None = None) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO tiktok_browser_events (video_url, event_type, screenshot_path)
+                VALUES (?, 'needs_manual_captcha', ?)
+                """,
+                (video_url, screenshot_path),
+            )
+
+    def recent_browser_events(self, limit: int = 10) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM tiktok_browser_events ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -121,6 +139,17 @@ class TikTokBackofficeStore:
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(comment_id) REFERENCES tiktok_comments(comment_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tiktok_browser_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_url TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    screenshot_path TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )

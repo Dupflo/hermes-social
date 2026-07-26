@@ -21,6 +21,11 @@ uv run tiktok-backoffice add-comment   --video-url 'https://www.tiktok.com/@dupf
 
 uv run tiktok-backoffice draft --comment-id comment-1 --keyword proxy   --reply 'Envoie-moi “proxy” en DM et je te l’envoie 👍'
 
+uv run tiktok-backoffice captcha-needed \
+  --video-url 'https://www.tiktok.com/@dupflodev' \
+  --screenshot-path /opt/data/browser_screenshots/captcha.png
+
+uv run tiktok-backoffice browser-events
 uv run tiktok-backoffice next
 uv run tiktok-backoffice list
 ```
@@ -34,3 +39,10 @@ When Camofox is available, the next incremental command should be a separate
 `browser-draft` action that opens TikTok with Hermes/Camofox, finds the comment,
 puts the reply text in the reply box, captures evidence, and stops before the
 Publish/Post action.
+
+## Live TikTok browser reality
+
+A first live Hermes browser check against `https://www.tiktok.com/@dupflodev`
+showed TikTok's slider CAPTCHA. The correct behavior is to record
+`needs_manual_captcha` and ask the operator to solve it through Camofox/noVNC,
+not to automate drag gestures blindly or claim discovery succeeded.
