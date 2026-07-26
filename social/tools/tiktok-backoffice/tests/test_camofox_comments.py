@@ -110,6 +110,7 @@ def test_fetch_comments_camofox_cli_reports_fetch_errors(tmp_path, monkeypatch):
 def test_camofox_logged_in_detection_rejects_log_in_to_comment():
     from app.camofox_reader import _COMMENT_EXTRACTION_JS
 
-    assert "Log in to comment" in _COMMENT_EXTRACTION_JS
-    assert "Sign up" in _COMMENT_EXTRACTION_JS
+    assert "Log\\s*in" in _COMMENT_EXTRACTION_JS
+    assert "to\\s+comment" in _COMMENT_EXTRACTION_JS
+    assert "Sign\\s*up" in _COMMENT_EXTRACTION_JS
     assert "logged_in" in _COMMENT_EXTRACTION_JS

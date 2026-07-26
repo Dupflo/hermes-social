@@ -278,7 +278,7 @@ _COMMENT_EXTRACTION_JS = r'''
   return {
     url: location.href,
     title: document.title,
-    logged_in: text.includes('Messages') && !/\b(Log in|Log in to comment|Sign up)\b/i.test(text),
+    logged_in: text.includes('Messages') && !/\b(Log\s*in(?:\s+to\s+comment)?|Sign\s*up)\b/i.test(text),
     captcha: /captcha|verify|slider|puzzle/i.test(text),
     comments_index: text.indexOf('Comments'),
     related_tab_active: relatedTabActive,
