@@ -1,0 +1,18 @@
+# Dependencies
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Secrets / local state
+.env
+.env.*
+!.env.example
+data/
+*.sqlite3
+*.db
+*.log
+
+# Evidence screenshots stay local by default
+screenshots/
+artifacts/

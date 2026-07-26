@@ -1,0 +1,17 @@
+import json
+
+from app.cli import run
+
+
+def test_cli_draft_is_local_only_and_requires_keyword(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    add = json.loads(run(["--db", str(db), "add-comment", "--video-url", "https://www.tiktok.com/@dupflodev/video/123", "--comment-id", "c1", "--author", "@alice", "--text", "Proxy"]))
+    assert add == {"ok": True, "changed": True}
+
+    no_match = json.loads(run(["--db", str(db), "draft", "--comment-id", "c1", "--keyword", "système", "--reply", "x"]))
+    assert no_match["error"] == "keyword_not_found"
+
+    drafted = json.loads(run(["--db", str(db), "draft", "--comment-id", "c1", "--keyword", "proxy", "--reply", "Envoie-moi proxy en DM 👍"]))
+    assert drafted["ok"] is True
+    assert drafted["mode"] == "draft_only"
+    assert "nothing was posted" in drafted["message"]

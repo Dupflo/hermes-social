@@ -25,3 +25,9 @@ Rules:
   environment variables declared in `deploy/.env.example`.
 - Each tool gets its own directory with a README and, if containerized, its
   own Dockerfile or compose service entry.
+## tiktok-backoffice/
+
+Draft-only TikTok comment backoffice helpers. The current implementation stores
+comments and suggested replies locally, but never publishes to TikTok. Runtime
+state and TikTok session material stay under `/opt/data`, outside the public
+repo.
