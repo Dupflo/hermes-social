@@ -278,7 +278,7 @@ _COMMENT_EXTRACTION_JS = r'''
   return {
     url: location.href,
     title: document.title,
-    logged_in: text.includes('Messages') && !text.includes('Log in to follow creators'),
+    logged_in: text.includes('Messages') && !/\b(Log in|Log in to comment|Sign up)\b/i.test(text),
     captcha: /captcha|verify|slider|puzzle/i.test(text),
     comments_index: text.indexOf('Comments'),
     related_tab_active: relatedTabActive,
