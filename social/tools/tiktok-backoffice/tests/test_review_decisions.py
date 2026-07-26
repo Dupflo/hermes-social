@@ -5,7 +5,7 @@ from app.cli import run
 
 def _make_review(db):
     run(["--db", str(db), "add-comment", "--video-url", "https://www.tiktok.com/@dupflodev/video/123", "--comment-id", "c1", "--author", "@alice", "--text", "proxy"] )
-    run(["--db", str(db), "campaign-upsert", "--slug", "proxy", "--name", "Proxy", "--keywords", "proxy", "--reply", "Je te mets le lien ici 👍"] )
+    run(["--db", str(db), "campaign-upsert", "--slug", "proxy", "--name", "Proxy", "--keywords", "proxy", "--reply", "Je viens de t’envoyer le lien en message privé"] )
     run(["--db", str(db), "match", "--campaign", "proxy"] )
     return json.loads(run(["--db", str(db), "next-review"]))["item"]["id"]
 
@@ -20,7 +20,7 @@ def test_approve_draft_moves_review_to_approved_for_draft(tmp_path):
     assert json.loads(run(["--db", str(db), "next-review"]))["item"] is None
     approved = json.loads(run(["--db", str(db), "review", "--review-id", str(review_id)]))["item"]
     assert approved["status"] == "approved_for_draft"
-    assert approved["reply_text"] == "Je te mets le lien ici 👍"
+    assert approved["reply_text"] == "Je viens de t’envoyer le lien en message privé"
 
 
 def test_ignore_review_records_operator_reason(tmp_path):

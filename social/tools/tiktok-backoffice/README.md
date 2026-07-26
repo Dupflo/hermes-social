@@ -19,7 +19,7 @@ review.
 ```bash
 uv run tiktok-backoffice add-comment   --video-url 'https://www.tiktok.com/@dupflodev/video/123'   --comment-id 'comment-1'   --author '@someone'   --text 'proxy'
 
-uv run tiktok-backoffice draft --comment-id comment-1 --keyword proxy   --reply 'Je te mets le lien ici 👍'
+uv run tiktok-backoffice draft --comment-id comment-1 --keyword proxy   --reply 'Je viens de t’envoyer le lien en message privé'
 
 uv run tiktok-backoffice captcha-needed \
   --video-url 'https://www.tiktok.com/@dupflodev' \
@@ -38,7 +38,7 @@ uv run tiktok-backoffice campaign-upsert \
   --slug proxy \
   --name 'Proxy' \
   --keywords 'proxy,proxies' \
-  --reply 'Je te mets le lien ici 👍'
+  --reply 'Je viens de t’envoyer le lien en message privé'
 
 # Match pending comments against a campaign and create review items idempotently
 uv run tiktok-backoffice match --campaign proxy
@@ -119,7 +119,8 @@ Browser worker integration contract:
 ## Reply template rule
 
 Campaign reply text must be the exact operator-configured message for the
-resource/campaign. Do **not** use a default template asking the commenter to DM
-first. If a platform blocks the intended private/public reply flow, surface the
-item to Hermes/Kanban for explicit operator approval instead of inventing a
-DM-first fallback.
+resource/campaign. Never put resource links in public TikTok replies. Public
+reply examples should say that the link was sent privately, e.g.
+`Je viens de t’envoyer le lien en message privé`. If the intended private/public
+reply flow is blocked, surface the item to Hermes/Kanban for explicit operator
+approval instead of inventing a fallback.

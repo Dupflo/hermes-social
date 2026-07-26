@@ -14,7 +14,7 @@ def test_campaign_match_creates_single_review_draft(tmp_path):
         "--slug", "proxy",
         "--name", "Proxy",
         "--keywords", "proxy,proxies",
-        "--reply", "Je te mets le lien ici 👍",
+        "--reply", "Je viens de t’envoyer le lien en message privé",
     ]))
     assert campaign == {"ok": True, "slug": "proxy"}
 
@@ -32,7 +32,7 @@ def test_campaign_match_creates_single_review_draft(tmp_path):
     item = json.loads(run(["--db", str(db), "next-review"]))["item"]
     assert item["comment_id"] == "c-proxy"
     assert item["campaign_slug"] == "proxy"
-    assert item["reply_text"] == "Je te mets le lien ici 👍"
+    assert item["reply_text"] == "Je viens de t’envoyer le lien en message privé"
     assert item["status"] == "pending_review"
 
 

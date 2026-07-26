@@ -11,7 +11,7 @@ def test_cli_draft_is_local_only_and_requires_keyword(tmp_path):
     no_match = json.loads(run(["--db", str(db), "draft", "--comment-id", "c1", "--keyword", "système", "--reply", "x"]))
     assert no_match["error"] == "keyword_not_found"
 
-    drafted = json.loads(run(["--db", str(db), "draft", "--comment-id", "c1", "--keyword", "proxy", "--reply", "Je te mets le lien ici 👍"]))
+    drafted = json.loads(run(["--db", str(db), "draft", "--comment-id", "c1", "--keyword", "proxy", "--reply", "Je viens de t’envoyer le lien en message privé"]))
     assert drafted["ok"] is True
     assert drafted["mode"] == "draft_only"
     assert "nothing was posted" in drafted["message"]

@@ -5,7 +5,7 @@ from app.cli import run
 
 def _approved_review(db):
     run(["--db", str(db), "add-comment", "--video-url", "https://www.tiktok.com/@dupflodev/video/123", "--comment-id", "c-browser", "--author", "@alice", "--text", "proxy"] )
-    run(["--db", str(db), "campaign-upsert", "--slug", "proxy", "--name", "Proxy", "--keywords", "proxy", "--reply", "Je te mets le lien ici 👍"] )
+    run(["--db", str(db), "campaign-upsert", "--slug", "proxy", "--name", "Proxy", "--keywords", "proxy", "--reply", "Je viens de t’envoyer le lien en message privé"] )
     run(["--db", str(db), "match", "--campaign", "proxy"] )
     review_id = json.loads(run(["--db", str(db), "next-review"]))["item"]["id"]
     run(["--db", str(db), "approve-draft", "--review-id", str(review_id)])
@@ -21,7 +21,7 @@ def test_next_browser_draft_returns_approved_item(tmp_path):
     assert item["id"] == review_id
     assert item["status"] == "approved_for_draft"
     assert item["video_url"] == "https://www.tiktok.com/@dupflodev/video/123"
-    assert item["reply_text"] == "Je te mets le lien ici 👍"
+    assert item["reply_text"] == "Je viens de t’envoyer le lien en message privé"
 
 
 def test_browser_drafted_marks_review_and_records_event(tmp_path):
