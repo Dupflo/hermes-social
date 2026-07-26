@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from pathlib import Path
 import re
@@ -34,6 +35,11 @@ def _caption_has_comment_cta_keyword(caption: str, keyword: str) -> bool:
                 return True
             start = idx + len(marker)
     return False
+
+
+def _comment_fingerprint(*, video_url: str, author: str | None, text: str, created_time: object | None = None) -> str:
+    material = "\u241f".join([video_url, author or "", text, "" if created_time is None else str(created_time)])
+    return "fp:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
 
 
 class TikTokBackofficeStore:
@@ -176,6 +182,149 @@ class TikTokBackofficeStore:
                 (video_url, campaign_slug, source, confidence, int(approved)),
             )
         return cursor.rowcount > 0
+
+
+    def poll_targets(self, limit: int = 50) -> list[dict]:
+        with self._connect() as connection:
+            video_rows = connection.execute(
+                """
+                SELECT DISTINCT v.video_url, v.video_id, v.caption
+                FROM tiktok_videos v
+                JOIN tiktok_video_campaigns vc ON vc.video_url = v.video_url
+                JOIN tiktok_campaigns c ON c.slug = vc.campaign_slug
+                WHERE v.active = 1
+                  AND c.active = 1
+                  AND vc.approved = 1
+                ORDER BY COALESCE(v.last_scanned_at, '1970-01-01') ASC,
+                         v.discovered_at DESC,
+                         v.video_url DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            targets: list[dict] = []
+            for video in video_rows:
+                campaign_rows = connection.execute(
+                    """
+                    SELECT c.slug, c.reply_template
+                    FROM tiktok_video_campaigns vc
+                    JOIN tiktok_campaigns c ON c.slug = vc.campaign_slug
+                    WHERE vc.video_url = ?
+                      AND vc.approved = 1
+                      AND c.active = 1
+                    ORDER BY c.slug
+                    """,
+                    (video["video_url"],),
+                ).fetchall()
+                campaigns: list[dict] = []
+                for campaign in campaign_rows:
+                    keyword_rows = connection.execute(
+                        "SELECT keyword FROM tiktok_campaign_keywords WHERE campaign_slug = ? ORDER BY keyword",
+                        (campaign["slug"],),
+                    ).fetchall()
+                    campaigns.append(
+                        {
+                            "slug": campaign["slug"],
+                            "keywords": [row["keyword"] for row in keyword_rows],
+                            "reply_template": campaign["reply_template"],
+                        }
+                    )
+                targets.append(
+                    {
+                        "video_url": video["video_url"],
+                        "video_id": video["video_id"],
+                        "caption": video["caption"],
+                        "campaigns": campaigns,
+                    }
+                )
+        return targets
+
+
+    def ingest_comments(self, *, video_url: str, comments: list[dict]) -> dict:
+        ingested = 0
+        created_reviews = 0
+        with self._connect() as connection:
+            video = connection.execute("SELECT video_id FROM tiktok_videos WHERE video_url = ?", (video_url,)).fetchone()
+            video_id = video["video_id"] if video else _video_id_from_url(video_url)
+            campaign_rows = connection.execute(
+                """
+                SELECT c.slug, c.reply_template
+                FROM tiktok_video_campaigns vc
+                JOIN tiktok_campaigns c ON c.slug = vc.campaign_slug
+                WHERE vc.video_url = ?
+                  AND vc.approved = 1
+                  AND c.active = 1
+                ORDER BY c.slug
+                """,
+                (video_url,),
+            ).fetchall()
+            campaigns: list[dict] = []
+            for campaign in campaign_rows:
+                keyword_rows = connection.execute(
+                    "SELECT keyword FROM tiktok_campaign_keywords WHERE campaign_slug = ? ORDER BY keyword",
+                    (campaign["slug"],),
+                ).fetchall()
+                campaigns.append(
+                    {
+                        "slug": campaign["slug"],
+                        "reply_template": campaign["reply_template"],
+                        "keywords": [row["keyword"] for row in keyword_rows],
+                    }
+                )
+
+            for raw in comments:
+                text = str(raw.get("text") or raw.get("comment") or "").strip()
+                if not text:
+                    continue
+                author = raw.get("author") or raw.get("username") or raw.get("user")
+                author = str(author).strip() if author is not None else None
+                comment_id = raw.get("id") or raw.get("comment_id")
+                if comment_id is None or not str(comment_id).strip():
+                    comment_id = _comment_fingerprint(
+                        video_url=video_url,
+                        author=author,
+                        text=text,
+                        created_time=raw.get("created_time") or raw.get("create_time") or raw.get("timestamp"),
+                    )
+                comment_id = str(comment_id).strip()
+                cursor = connection.execute(
+                    """
+                    INSERT INTO tiktok_comments (video_url, video_id, comment_id, author, text, status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(comment_id) DO NOTHING
+                    """,
+                    (video_url, video_id, comment_id, author, text, ReviewStatus.PENDING_REVIEW),
+                )
+                inserted = cursor.rowcount > 0
+                if inserted:
+                    ingested += 1
+                if not inserted:
+                    continue
+                for campaign in campaigns:
+                    matched_keyword = next((keyword for keyword in campaign["keywords"] if contains_keyword(text, keyword)), None)
+                    if matched_keyword is None:
+                        continue
+                    review_cursor = connection.execute(
+                        """
+                        INSERT OR IGNORE INTO tiktok_review_items (
+                            comment_id, campaign_slug, matched_keyword, reply_text, status
+                        ) VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            comment_id,
+                            campaign["slug"],
+                            matched_keyword,
+                            campaign["reply_template"],
+                            ReviewItemStatus.PENDING_REVIEW,
+                        ),
+                    )
+                    created_reviews += review_cursor.rowcount
+            if comments:
+                connection.execute(
+                    "UPDATE tiktok_videos SET last_scanned_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE video_url = ?",
+                    (video_url,),
+                )
+        return {"ingested": ingested, "created_reviews": created_reviews}
 
     def add_comment(self, comment: TikTokComment) -> bool:
         with self._connect() as connection:

@@ -45,6 +45,15 @@ def build_parser() -> argparse.ArgumentParser:
     approve_video_campaign.add_argument("--video-url", required=True)
     approve_video_campaign.add_argument("--campaign", required=True)
 
+
+    poll_targets = sub.add_parser("poll-targets")
+    poll_targets.add_argument("--limit", type=int, default=50)
+
+
+    ingest = sub.add_parser("ingest-comments")
+    ingest.add_argument("--video-url", required=True)
+    ingest.add_argument("--json-file", type=Path, required=True)
+
     add = sub.add_parser("add-comment")
     add.add_argument("--video-url", required=True)
     add.add_argument("--video-id")
@@ -136,6 +145,19 @@ def run(argv: list[str] | None = None) -> str:
     if args.command == "approve-video-campaign":
         changed = store.approve_video_campaign(video_url=args.video_url, campaign_slug=args.campaign)
         return json.dumps({"ok": True, "changed": changed}, ensure_ascii=False)
+
+
+    if args.command == "poll-targets":
+        return json.dumps({"ok": True, "items": store.poll_targets(limit=args.limit)}, ensure_ascii=False)
+
+
+    if args.command == "ingest-comments":
+        payload = json.loads(args.json_file.read_text())
+        comments = payload.get("comments", payload) if isinstance(payload, dict) else payload
+        if not isinstance(comments, list):
+            return json.dumps({"ok": False, "error": "json_must_be_list_or_comments_object"}, ensure_ascii=False)
+        result = store.ingest_comments(video_url=args.video_url, comments=comments)
+        return json.dumps({"ok": True, **result}, ensure_ascii=False)
 
     if args.command == "add-comment":
         changed = store.add_comment(TikTokComment(video_url=args.video_url, video_id=args.video_id, comment_id=args.comment_id, author=args.author, text=args.text))

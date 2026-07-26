@@ -203,6 +203,44 @@ Browser worker integration contract:
 - `browser-drafted` still means **not posted**. There is intentionally no publish
   command in this increment.
 
+
+## Poll target and comment ingestion
+
+Once video/campaign mappings are approved, `poll-targets` returns exactly the
+active TikTok videos that should be scanned for comments, with only approved
+campaigns and their safe public reply template.
+
+```bash
+uv run tiktok-backoffice poll-targets --limit 20
+```
+
+`ingest-comments` is the safe ingestion boundary for any reader source
+(official Research API later, browser extraction, or another read-only scraper).
+It imports comments for one approved video, fingerprints comments without a
+platform ID, ignores duplicates, and creates review items only when the comment
+text matches a campaign approved for that video.
+
+```bash
+uv run tiktok-backoffice ingest-comments \
+  --video-url 'https://www.tiktok.com/@dupflodev/video/123' \
+  --json-file /opt/data/tiktok-backoffice/comments-123.json
+```
+
+Accepted JSON shapes:
+
+```json
+[{"id": "comment-id", "author": "@alice", "text": "proxy"}]
+```
+
+or:
+
+```json
+{"comments": [{"author": "@alice", "text": "proxy", "created_time": 1234}]}
+```
+
+`ingest-comments` never posts. It only creates local `pending_review` items for
+Hermes/Kanban/operator approval.
+
 ## Reply template rule
 
 Campaign reply text must be the exact operator-configured message for the
