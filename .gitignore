@@ -1,0 +1,24 @@
+# ── Secrets — never commit these ────────────────────────────────────────────
+.env
+*.env
+!.env.example
+!deploy/.env.example
+auth.json
+*.pem
+*.key
+secrets/
+credentials*
+
+# ── Runtime data (belongs on the VPS volume, not in git) ────────────────────
+data/
+*.bak
+*.log
+
+# ── OS / editor noise ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+node_modules/

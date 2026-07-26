@@ -1,0 +1,46 @@
+# Hermes Social — full stack: agent + Camofox browser.
+#
+# Fresh VPS: see ../README.md or just run ./bootstrap.sh
+#
+# Networking: hermes reaches camofox by service name over the compose
+# network — nothing browser-related is published on the public interface.
+# noVNC (6080) and VNC (5901) are bound to 127.0.0.1 only; use an SSH
+# tunnel:  ssh -L 6080:127.0.0.1:6080 root@<vps>  →  http://localhost:6080
+
+services:
+  hermes:
+    image: hermes-social:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4860:4860"        # web UI — front it with a reverse proxy for TLS
+    env_file:
+      - .env
+    environment:
+      CAMOFOX_URL: http://camofox:9377
+    volumes:
+      - ./data:/opt/data
+      # Root-equivalent access to the host's Docker — deliberate choice so the
+      # agent can manage containers itself. Remove if a given VPS shouldn't
+      # grant that.
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - camofox
+
+  camofox:
+    # Built from https://github.com/jo-inc/camofox-browser → `make camofox`.
+    # Adjust the tag to your arch (x86_64 / aarch64).
+    image: camofox-browser:135.0.1-x86_64
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6080:6080"        # noVNC — local only, SSH tunnel to reach
+      - "127.0.0.1:5901:5900"        # raw VNC — local only
+    environment:
+      CAMOFOX_PORT: "9377"
+      ENABLE_VNC: "1"
+      VNC_BIND: 0.0.0.0
+      VNC_RESOLUTION: 1920x1080
+      MAX_OLD_SPACE_SIZE: "2048"
+    volumes:
+      - ./camofox-data:/root/.camofox

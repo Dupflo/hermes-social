@@ -1,0 +1,13 @@
+# Hermes Social — config snippet to merge into /opt/data/config.yaml.
+# (Hermes reads config.yaml from its data volume; these are the keys the
+# social layer relies on.)
+
+skills:
+  external_dirs:
+    - /opt/hermes-social/skills
+
+browser:
+  camofox:
+    managed_persistence: true
+    rewrite_loopback_urls: true
+    loopback_host_alias: host.docker.internal
