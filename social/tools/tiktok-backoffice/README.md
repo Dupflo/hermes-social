@@ -19,7 +19,7 @@ review.
 ```bash
 uv run tiktok-backoffice add-comment   --video-url 'https://www.tiktok.com/@dupflodev/video/123'   --comment-id 'comment-1'   --author '@someone'   --text 'proxy'
 
-uv run tiktok-backoffice draft --comment-id comment-1 --keyword proxy   --reply 'Envoie-moi “proxy” en DM et je te l’envoie 👍'
+uv run tiktok-backoffice draft --comment-id comment-1 --keyword proxy   --reply 'Je te mets le lien ici 👍'
 
 uv run tiktok-backoffice captcha-needed \
   --video-url 'https://www.tiktok.com/@dupflodev' \
@@ -38,7 +38,7 @@ uv run tiktok-backoffice campaign-upsert \
   --slug proxy \
   --name 'Proxy' \
   --keywords 'proxy,proxies' \
-  --reply 'Envoie-moi “proxy” en DM et je te l’envoie 👍'
+  --reply 'Je te mets le lien ici 👍'
 
 # Match pending comments against a campaign and create review items idempotently
 uv run tiktok-backoffice match --campaign proxy
@@ -115,3 +115,11 @@ Browser worker integration contract:
   screenshot path. This records `drafted_in_browser` and a browser event.
 - `browser-drafted` still means **not posted**. There is intentionally no publish
   command in this increment.
+
+## Reply template rule
+
+Campaign reply text must be the exact operator-configured message for the
+resource/campaign. Do **not** use a default template asking the commenter to DM
+first. If a platform blocks the intended private/public reply flow, surface the
+item to Hermes/Kanban for explicit operator approval instead of inventing a
+DM-first fallback.
