@@ -63,9 +63,15 @@ class TikTokBackofficeStore:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_comments(self, limit: int = 20) -> list[dict]:
+    def list_comments(self, limit: int = 20, status: str | None = None) -> list[dict]:
         with self._connect() as connection:
-            rows = connection.execute("SELECT * FROM tiktok_comments ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+            if status:
+                rows = connection.execute(
+                    "SELECT * FROM tiktok_comments WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+                    (status, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute("SELECT * FROM tiktok_comments ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(row) for row in rows]
 
     def save_draft(self, draft: ReplyDraft) -> None:
@@ -97,13 +103,27 @@ class TikTokBackofficeStore:
         return dict(row) if row else None
 
     def mark_needs_manual_captcha(self, *, video_url: str, screenshot_path: str | None = None) -> None:
+        self.add_browser_event(
+            video_url=video_url,
+            event_type="needs_manual_captcha",
+            screenshot_path=screenshot_path,
+        )
+
+    def mark_browser_draft_filled(self, *, video_url: str, screenshot_path: str | None = None) -> None:
+        self.add_browser_event(
+            video_url=video_url,
+            event_type="browser_draft_filled_not_posted",
+            screenshot_path=screenshot_path,
+        )
+
+    def add_browser_event(self, *, video_url: str, event_type: str, screenshot_path: str | None = None) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO tiktok_browser_events (video_url, event_type, screenshot_path)
-                VALUES (?, 'needs_manual_captcha', ?)
+                VALUES (?, ?, ?)
                 """,
-                (video_url, screenshot_path),
+                (video_url, event_type, screenshot_path),
             )
 
     def recent_browser_events(self, limit: int = 10) -> list[dict]:

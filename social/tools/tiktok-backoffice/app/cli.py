@@ -31,10 +31,15 @@ def build_parser() -> argparse.ArgumentParser:
     captcha.add_argument("--video-url", required=True)
     captcha.add_argument("--screenshot-path")
 
+    browser_draft = sub.add_parser("browser-draft-filled")
+    browser_draft.add_argument("--video-url", required=True)
+    browser_draft.add_argument("--screenshot-path")
+
     sub.add_parser("browser-events")
     sub.add_parser("next")
     list_cmd = sub.add_parser("list")
     list_cmd.add_argument("--limit", type=int, default=20)
+    list_cmd.add_argument("--status")
     return parser
 
 
@@ -69,6 +74,17 @@ def run(argv: list[str] | None = None) -> str:
             ensure_ascii=False,
         )
 
+    if args.command == "browser-draft-filled":
+        store.mark_browser_draft_filled(video_url=args.video_url, screenshot_path=args.screenshot_path)
+        return json.dumps(
+            {
+                "ok": True,
+                "status": "browser_draft_filled_not_posted",
+                "message": "Browser reply draft was filled and captured; nothing was posted to TikTok.",
+            },
+            ensure_ascii=False,
+        )
+
     if args.command == "browser-events":
         return json.dumps({"ok": True, "items": store.recent_browser_events()}, ensure_ascii=False)
 
@@ -76,7 +92,7 @@ def run(argv: list[str] | None = None) -> str:
         return json.dumps({"ok": True, "item": store.next_pending()}, ensure_ascii=False)
 
     if args.command == "list":
-        return json.dumps({"ok": True, "items": store.list_comments(limit=args.limit)}, ensure_ascii=False)
+        return json.dumps({"ok": True, "items": store.list_comments(limit=args.limit, status=args.status)}, ensure_ascii=False)
 
     raise AssertionError(f"Unhandled command: {args.command}")
 

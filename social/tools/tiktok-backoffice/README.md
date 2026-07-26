@@ -25,9 +25,13 @@ uv run tiktok-backoffice captcha-needed \
   --video-url 'https://www.tiktok.com/@dupflodev' \
   --screenshot-path /opt/data/browser_screenshots/captcha.png
 
+uv run tiktok-backoffice browser-draft-filled \
+  --video-url 'https://www.tiktok.com/@dupflodev/video/7665295144496762134' \
+  --screenshot-path /opt/data/browser_screenshots/draft.png
+
 uv run tiktok-backoffice browser-events
 uv run tiktok-backoffice next
-uv run tiktok-backoffice list
+uv run tiktok-backoffice list --status drafted_in_browser
 ```
 
 `draft` records a draft locally and returns the exact text to review. It does

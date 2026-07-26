@@ -15,3 +15,14 @@ def test_cli_draft_is_local_only_and_requires_keyword(tmp_path):
     assert drafted["ok"] is True
     assert drafted["mode"] == "draft_only"
     assert "nothing was posted" in drafted["message"]
+
+
+def test_list_filters_status(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    run(["--db", str(db), "add-comment", "--video-url", "https://example.com/v", "--comment-id", "c1", "--author", "@a", "--text", "proxy"])
+    run(["--db", str(db), "draft", "--comment-id", "c1", "--keyword", "proxy", "--reply", "ok"])
+
+    result = json.loads(run(["--db", str(db), "list", "--status", "drafted_in_browser"]))
+
+    assert result["ok"] is True
+    assert [item["comment_id"] for item in result["items"]] == ["c1"]
