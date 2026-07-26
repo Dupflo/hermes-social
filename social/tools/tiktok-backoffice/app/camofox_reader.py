@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -62,7 +63,7 @@ def _looks_like_comment(text: str) -> bool:
         return False
     if text.isdigit():
         return False
-    if lowered in {"reply", "add comment..."}:
+    if lowered in {"reply", "add comment...", "log in", "sign up"}:
         return False
     if lowered.startswith("view ") and "repl" in lowered:
         return False
@@ -81,6 +82,81 @@ def _looks_like_comment(text: str) -> bool:
     if "© 2026 tiktok" in lowered:
         return False
     return True
+
+
+
+_DATE_LINE_RE = re.compile(r"^(?:\d+[smhdw]|\d{1,2}-\d{1,2}|Yesterday|Today)(?:\s+ago)?$", re.IGNORECASE)
+
+
+def _looks_like_comment_count_line(text: str) -> bool:
+    return bool(re.fullmatch(r"\d+[KkMm]?(?:\s+comments?)?", text.strip()))
+
+
+def _extract_comment_nodes_from_panel_text(panel_text: str) -> list[dict[str, str]]:
+    """Fallback parser for TikTok's Comments panel when DOM class names change."""
+    raw_lines = [line.strip() for line in str(panel_text or "").splitlines()]
+    lines = [line for line in raw_lines if line]
+    if not lines:
+        return []
+    start = None
+    for index, line in enumerate(lines):
+        if re.fullmatch(r"\d+[KkMm]?\s+comments?", line, flags=re.IGNORECASE):
+            start = index + 1
+            break
+    if start is None:
+        return []
+    comments: list[dict[str, str]] = []
+    index = start
+    seen: set[tuple[str, str]] = set()
+    while index < len(lines) - 1:
+        line = lines[index]
+        lowered = line.lower()
+        if lowered.startswith("add comment") or lowered.startswith("you may like"):
+            break
+        if (
+            line in _NAVIGATION_TEXT
+            or _looks_like_comment_count_line(line)
+            or _DATE_LINE_RE.match(line)
+            or lowered == "reply"
+            or (lowered.startswith("view ") and "repl" in lowered)
+        ):
+            index += 1
+            continue
+        author = line
+        text_index = index + 1
+        text = lines[text_index]
+        if not _looks_like_comment(text):
+            index += 1
+            continue
+        cursor = text_index + 1
+        seen_reply = False
+        while cursor < len(lines):
+            current = lines[cursor]
+            current_lower = current.lower()
+            if current_lower == "reply":
+                seen_reply = True
+                cursor += 1
+                continue
+            if current_lower.startswith("view ") and "repl" in current_lower:
+                cursor += 1
+                break
+            if current_lower.startswith("add comment"):
+                break
+            if seen_reply and not (_looks_like_comment_count_line(current) or _DATE_LINE_RE.match(current)):
+                break
+            cursor += 1
+            if cursor - text_index > 8:
+                break
+        # Panel-text fallback often only exposes display names (e.g. "Elsa"),
+        # not stable @handles. Preserve those as display text instead of
+        # inventing @Elsa, which would be misleading.
+        normalized_author = author if not author.startswith("@") else (_normalize_author(author) or author)
+        key = (normalized_author, text)
+        if key not in seen:
+            seen.add(key)
+            comments.append({"author": normalized_author, "text": text})
+        index = max(cursor, index + 2)
+    return comments
 
 
 def extract_comments_from_dom_result(dom_result: dict[str, Any]) -> list[dict[str, str]]:
@@ -107,6 +183,14 @@ def extract_comments_from_dom_result(dom_result: dict[str, Any]) -> list[dict[st
         if author:
             item["author"] = author
         comments.append(item)
+    if comments:
+        return comments
+    if dom_result.get("logged_in") is False and re.search(r"\b(Log\s*in|Sign\s*up)\b", str(dom_result.get("body_preview") or ""), re.IGNORECASE):
+        return comments
+    for key in ("active_right_panel_preview", "right_panel_text", "body_preview"):
+        fallback_nodes = _extract_comment_nodes_from_panel_text(str(dom_result.get(key) or ""))
+        if fallback_nodes:
+            return fallback_nodes
     return comments
 
 
@@ -150,6 +234,33 @@ _ACTIVATE_COMMENTS_TAB_JS = r'''
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0 && r.x >= 0 && r.y >= 0;
   }
+  function rect(el) {
+    const r = el.getBoundingClientRect();
+    return {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)};
+  }
+  function clickElement(el) {
+    el.scrollIntoView({block: 'center', inline: 'center'});
+    el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true, view: window}));
+    el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, view: window}));
+    el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, view: window}));
+    el.click();
+  }
+  const beforeText = document.body.innerText || '';
+  const beforeHasPanel = /\b\d+\s+comments\b/i.test(beforeText) && /Add comment/i.test(beforeText);
+  const commentIcons = Array.from(document.querySelectorAll('[data-e2e="comment-icon"]'))
+    .filter(visible)
+    .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent), aria: el.getAttribute('aria-label') || ''}))
+    .filter(x => /comment/i.test(x.aria) || /^\d+[KkMm]?$/.test(x.text));
+  let clicked = null;
+  if (!beforeHasPanel && commentIcons.length) {
+    const icon = commentIcons
+      .filter(x => x.r.x > window.innerWidth * 0.45 && x.r.y > window.innerHeight * 0.35 && x.r.y < window.innerHeight * 0.9)
+      .sort((a, b) => Math.abs(a.r.x - window.innerWidth * 0.68) + Math.abs(a.r.y - window.innerHeight * 0.7)
+                  - Math.abs(b.r.x - window.innerWidth * 0.68) - Math.abs(b.r.y - window.innerHeight * 0.7))[0]
+      || commentIcons[0];
+    clickElement(icon.el);
+    clicked = {kind: 'comment_icon', text: icon.text, aria: icon.aria, rect: rect(icon.el)};
+  }
   const rightPanel = Array.from(document.querySelectorAll('div, aside, section'))
     .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent)}))
     .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.width > 200 && /Comments/.test(x.text))
@@ -160,22 +271,21 @@ _ACTIVATE_COMMENTS_TAB_JS = r'''
     .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent), aria: el.getAttribute('aria-label') || '', role: el.getAttribute('role') || '', cls: String(el.className || '')}))
     .filter(x => x.text === 'Comments' || /Comments/.test(x.aria));
   const tab = candidates
-    .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.y < 180)
-    .sort((a, b) => a.r.x - b.r.x)[0] || candidates[0];
+    .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.y < 220)
+    .sort((a, b) => a.r.x - b.r.x)[0];
   if (tab) {
-    tab.el.scrollIntoView({block: 'center', inline: 'center'});
-    tab.el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
-    tab.el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
-    tab.el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
-    tab.el.click();
+    clickElement(tab.el);
+    clicked = {kind: 'comments_tab', text: tab.text, aria: tab.aria, role: tab.role, cls: tab.cls.slice(0, 120), rect: rect(tab.el), previous: clicked};
   }
   return {
-    clicked: Boolean(tab),
-    target: tab ? {text: tab.text, aria: tab.aria, role: tab.role, cls: tab.cls.slice(0, 120), rect: {x: Math.round(tab.r.x), y: Math.round(tab.r.y), w: Math.round(tab.r.width), h: Math.round(tab.r.height)}} : null,
+    clicked: Boolean(clicked),
+    target: clicked,
+    comment_icon_candidates: commentIcons.map(x => ({text: x.text, aria: x.aria, rect: rect(x.el)})).slice(0, 5),
     right_panel_text: clean((rightPanel || document.body).innerText || '').slice(0, 800),
   };
 })()
 '''
+
 
 
 _COMMENT_EXTRACTION_JS = r'''
@@ -226,6 +336,8 @@ _COMMENT_EXTRACTION_JS = r'''
   const relatedTabActive = /You may like/.test(activeRightPanelText) && /recommend-list-item|DivRelatedTab|e9pwkrg|recommend/i.test(document.body.innerHTML);
   const containerSelector = [
     '[class*="DivCommentItemWrapper"]',
+    '[class*="CommentItem"]',
+    '[class*="CommentObject"]',
     '[data-e2e*="comment-item"]',
     '[data-e2e*="comment-level"]'
   ].join(',');

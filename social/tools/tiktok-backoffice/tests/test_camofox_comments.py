@@ -114,3 +114,84 @@ def test_camofox_logged_in_detection_rejects_log_in_to_comment():
     assert "to\\s+comment" in _COMMENT_EXTRACTION_JS
     assert "Sign\\s*up" in _COMMENT_EXTRACTION_JS
     assert "logged_in" in _COMMENT_EXTRACTION_JS
+
+
+
+def test_extract_dom_comments_falls_back_to_visible_comments_panel_text():
+    from app.camofox_reader import extract_comments_from_dom_result
+
+    result = {
+        "comment_nodes": [],
+        "active_right_panel_preview": """
+Comments
+You may like
+13 comments
+stdn
+higgsfield
+4d ago
+Reply
+1
+Ashvin Appigadoo
+Higgsfield
+7-18
+Reply
+1
+View 1 reply
+loki_le_fripon
+Higgsfield 🔥
+7-8
+Reply
+1
+View 1 reply
+Elsa
+higgsfield
+7-5
+Reply
+1
+View 1 reply
+Add comment...
+""",
+    }
+
+    comments = extract_comments_from_dom_result(result)
+
+    assert comments[:4] == [
+        {"author": "stdn", "text": "higgsfield"},
+        {"author": "Ashvin Appigadoo", "text": "Higgsfield"},
+        {"author": "loki_le_fripon", "text": "Higgsfield 🔥"},
+        {"author": "Elsa", "text": "higgsfield"},
+    ]
+
+
+def test_activate_comments_tab_prefers_comment_icon_not_favorites_or_bookmark():
+    from app.camofox_reader import _ACTIVATE_COMMENTS_TAB_JS
+
+    assert 'data-e2e="comment-icon"' in _ACTIVATE_COMMENTS_TAB_JS
+    assert "comment_icon" in _ACTIVATE_COMMENTS_TAB_JS
+    assert "favorite-icon" not in _ACTIVATE_COMMENTS_TAB_JS
+    assert "BookmarkWrapper" not in _ACTIVATE_COMMENTS_TAB_JS
+
+
+
+def test_extract_dom_comments_does_not_parse_login_gate_as_comments():
+    from app.camofox_reader import extract_comments_from_dom_result
+
+    result = {
+        "logged_in": False,
+        "comment_nodes": [],
+        "body_preview": """
+TikTok
+Search
+Profile
+More
+Log in
+We're having trouble playing this video. Please refresh and try again.
+42
+13
+dupflodev
+· 1d ago
+Tu passes de Claude Code à Codex ? Commente MIGRATION 👇
+""",
+    }
+
+    assert extract_comments_from_dom_result(result) == []
