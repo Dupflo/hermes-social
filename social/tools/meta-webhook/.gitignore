@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Local runtime data
+data/
+.deploy-trigger
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Build outputs
+dist/
+build/
+coverage/

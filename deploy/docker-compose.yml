@@ -28,6 +28,22 @@ services:
     depends_on:
       - camofox
 
+  # Meta comment→DM automation (social/tools/meta-webhook) — FastAPI webhook
+  # receiver. Meta calls it via your reverse proxy → 127.0.0.1:8791.
+  meta-webhook:
+    image: ghcr.io/astral-sh/uv:python3.13-bookworm
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8791:8791"
+    volumes:
+      - ../social/tools/meta-webhook:/app
+      - ./meta-webhook-data:/app/data
+      - /app/.venv            # keep the venv out of the repo checkout
+    command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8791"]
+
   camofox:
     # Built from https://github.com/jo-inc/camofox-browser → `make camofox`.
     # Adjust the tag to your arch (x86_64 / aarch64).
