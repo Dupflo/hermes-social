@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+import re
 
 from app.keyword import contains_keyword
-from app.models import Campaign, ReplyDraft, ReviewItemStatus, ReviewStatus, TikTokComment
+from app.models import Campaign, ReplyDraft, ReviewItemStatus, ReviewStatus, TikTokComment, TikTokVideo
+
+
+def _video_id_from_url(video_url: str) -> str | None:
+    match = re.search(r"/video/(\d+)", video_url)
+    return match.group(1) if match else None
 
 
 class TikTokBackofficeStore:
@@ -17,6 +23,69 @@ class TikTokBackofficeStore:
         connection = sqlite3.connect(self.database)
         connection.row_factory = sqlite3.Row
         return connection
+
+
+    def add_video(self, video: TikTokVideo) -> bool:
+        video_id = video.video_id or _video_id_from_url(video.video_url)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO tiktok_videos (video_url, video_id, author, caption, active)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(video_url) DO UPDATE SET
+                    video_id = COALESCE(excluded.video_id, tiktok_videos.video_id),
+                    author = COALESCE(excluded.author, tiktok_videos.author),
+                    caption = COALESCE(excluded.caption, tiktok_videos.caption),
+                    active = excluded.active,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE
+                    COALESCE(tiktok_videos.video_id, '') != COALESCE(excluded.video_id, '') OR
+                    COALESCE(tiktok_videos.author, '') != COALESCE(excluded.author, '') OR
+                    COALESCE(tiktok_videos.caption, '') != COALESCE(excluded.caption, '') OR
+                    tiktok_videos.active != excluded.active
+                """,
+                (video.video_url, video_id, video.author, video.caption, int(video.active)),
+            )
+        return cursor.rowcount > 0
+
+    def list_videos(self, *, with_campaigns: bool = False, limit: int = 50) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM tiktok_videos ORDER BY discovered_at DESC, video_url DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            items = [dict(row) for row in rows]
+            if with_campaigns:
+                for item in items:
+                    campaign_rows = connection.execute(
+                        """
+                        SELECT campaign_slug, source, confidence, approved
+                        FROM tiktok_video_campaigns
+                        WHERE video_url = ?
+                        ORDER BY campaign_slug
+                        """,
+                        (item["video_url"],),
+                    ).fetchall()
+                    item["campaigns"] = [dict(row) for row in campaign_rows]
+        return items
+
+    def assign_video_campaign(self, *, video_url: str, campaign_slug: str, source: str = "manual", confidence: float = 1.0, approved: bool = True) -> bool:
+        with self._connect() as connection:
+            video = connection.execute("SELECT 1 FROM tiktok_videos WHERE video_url = ?", (video_url,)).fetchone()
+            if video is None:
+                raise KeyError(f"Unknown video_url: {video_url}")
+            campaign = connection.execute("SELECT 1 FROM tiktok_campaigns WHERE slug = ?", (campaign_slug,)).fetchone()
+            if campaign is None:
+                raise KeyError(f"Unknown campaign: {campaign_slug}")
+            cursor = connection.execute(
+                """
+                INSERT INTO tiktok_video_campaigns (video_url, campaign_slug, source, confidence, approved)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(video_url, campaign_slug) DO NOTHING
+                """,
+                (video_url, campaign_slug, source, confidence, int(approved)),
+            )
+        return cursor.rowcount > 0
 
     def add_comment(self, comment: TikTokComment) -> bool:
         with self._connect() as connection:
@@ -340,6 +409,37 @@ class TikTokBackofficeStore:
 
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
+
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tiktok_videos (
+                    video_url TEXT PRIMARY KEY,
+                    video_id TEXT,
+                    author TEXT,
+                    caption TEXT,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_scanned_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tiktok_video_campaigns (
+                    video_url TEXT NOT NULL,
+                    campaign_slug TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'manual',
+                    confidence REAL NOT NULL DEFAULT 1.0,
+                    approved INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (video_url, campaign_slug),
+                    FOREIGN KEY(video_url) REFERENCES tiktok_videos(video_url),
+                    FOREIGN KEY(campaign_slug) REFERENCES tiktok_campaigns(slug)
+                )
+                """
+            )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS tiktok_comments (

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.keyword import contains_keyword
-from app.models import Campaign, ReplyDraft, ReviewItemStatus, TikTokComment
+from app.models import Campaign, ReplyDraft, ReviewItemStatus, TikTokComment, TikTokVideo
 from app.store import TikTokBackofficeStore
 
 
@@ -14,6 +14,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Draft-only TikTok backoffice")
     parser.add_argument("--db", type=Path, default=None)
     sub = parser.add_subparsers(dest="command", required=True)
+
+
+    add_video = sub.add_parser("add-video")
+    add_video.add_argument("--video-url", required=True)
+    add_video.add_argument("--video-id")
+    add_video.add_argument("--author")
+    add_video.add_argument("--caption")
+
+    list_videos = sub.add_parser("list-videos")
+    list_videos.add_argument("--with-campaigns", action="store_true")
+    list_videos.add_argument("--limit", type=int, default=50)
+
+    assign_video = sub.add_parser("assign-video")
+    assign_video.add_argument("--video-url", required=True)
+    assign_video.add_argument("--campaign", required=True)
+    assign_video.add_argument("--source", default="manual")
+    assign_video.add_argument("--confidence", type=float, default=1.0)
 
     add = sub.add_parser("add-comment")
     add.add_argument("--video-url", required=True)
@@ -74,6 +91,18 @@ def run(argv: list[str] | None = None) -> str:
     args = build_parser().parse_args(argv)
     settings = Settings()
     store = TikTokBackofficeStore(args.db or settings.tiktok_backoffice_db)
+
+
+    if args.command == "add-video":
+        changed = store.add_video(TikTokVideo(video_url=args.video_url, video_id=args.video_id, author=args.author, caption=args.caption))
+        return json.dumps({"ok": True, "changed": changed}, ensure_ascii=False)
+
+    if args.command == "list-videos":
+        return json.dumps({"ok": True, "items": store.list_videos(with_campaigns=args.with_campaigns, limit=args.limit)}, ensure_ascii=False)
+
+    if args.command == "assign-video":
+        changed = store.assign_video_campaign(video_url=args.video_url, campaign_slug=args.campaign, source=args.source, confidence=args.confidence)
+        return json.dumps({"ok": True, "changed": changed}, ensure_ascii=False)
 
     if args.command == "add-comment":
         changed = store.add_comment(TikTokComment(video_url=args.video_url, video_id=args.video_id, comment_id=args.comment_id, author=args.author, text=args.text))

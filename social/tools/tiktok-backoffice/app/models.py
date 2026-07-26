@@ -47,3 +47,12 @@ class Campaign:
     keywords: tuple[str, ...]
     reply_template: str
     active: bool = True
+
+
+@dataclass(frozen=True)
+class TikTokVideo:
+    video_url: str
+    video_id: str | None = None
+    author: str | None = None
+    caption: str | None = None
+    active: bool = True

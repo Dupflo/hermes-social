@@ -81,6 +81,32 @@ not to automate drag gestures blindly or claim discovery succeeded.
 
 ## Campaign review flow
 
+
+## Video/campaign registry
+
+Use the video registry to avoid asking for TikTok IDs every time. Videos can be
+added manually first, then later discovered automatically from the profile.
+
+```bash
+# Register a TikTok video to monitor
+uv run tiktok-backoffice add-video \
+  --video-url 'https://www.tiktok.com/@dupflodev/video/123' \
+  --caption 'Proxy propre pour VPS'
+
+# Assign the video to a local campaign
+uv run tiktok-backoffice assign-video \
+  --video-url 'https://www.tiktok.com/@dupflodev/video/123' \
+  --campaign proxy \
+  --source manual
+
+# Inspect videos and campaign links
+uv run tiktok-backoffice list-videos --with-campaigns
+```
+
+`assign-video` is idempotent. Future automatic discovery can fill this same
+registry and propose campaign links from captions/Meta reflections before
+operator approval.
+
 TikTok campaigns are local SQL objects: a slug, display name, comma-separated
 keywords, and a proposed reply template. `match --campaign <slug>` scans
 `pending_review` / `needs_review` comments, creates one review item per
