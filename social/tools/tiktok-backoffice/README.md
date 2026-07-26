@@ -32,6 +32,19 @@ uv run tiktok-backoffice browser-draft-filled \
 uv run tiktok-backoffice browser-events
 uv run tiktok-backoffice next
 uv run tiktok-backoffice list --status drafted_in_browser
+
+# Create/update a local keyword campaign
+uv run tiktok-backoffice campaign-upsert \
+  --slug proxy \
+  --name 'Proxy' \
+  --keywords 'proxy,proxies' \
+  --reply 'Envoie-moi “proxy” en DM et je te l’envoie 👍'
+
+# Match pending comments against a campaign and create review items idempotently
+uv run tiktok-backoffice match --campaign proxy
+
+# Fetch the next campaign/comment item for Hermes/Kanban review
+uv run tiktok-backoffice next-review
 ```
 
 `draft` records a draft locally and returns the exact text to review. It does
@@ -50,3 +63,19 @@ A first live Hermes browser check against `https://www.tiktok.com/@dupflodev`
 showed TikTok's slider CAPTCHA. The correct behavior is to record
 `needs_manual_captcha` and ask the operator to solve it through Camofox/noVNC,
 not to automate drag gestures blindly or claim discovery succeeded.
+
+## Campaign review flow
+
+TikTok campaigns are local SQL objects: a slug, display name, comma-separated
+keywords, and a proposed reply template. `match --campaign <slug>` scans
+`pending_review` / `needs_review` comments, creates one review item per
+`comment_id + campaign_slug`, and is safe to run repeatedly.
+
+`next-review` returns the oldest pending review item with the source comment,
+matched keyword, campaign slug, and proposed reply text. Hermes/Kanban should
+use that item as the human approval unit before any browser draft or publish
+action.
+
+TikTok Open API does not currently provide a public Meta-like comment webhook,
+public comment reply endpoint, or DM/private-reply endpoint for standard social
+videos. This tool is therefore read/poll + review + browser-assisted action.

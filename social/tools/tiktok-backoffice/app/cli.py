@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.keyword import contains_keyword
-from app.models import ReplyDraft, TikTokComment
+from app.models import Campaign, ReplyDraft, TikTokComment
 from app.store import TikTokBackofficeStore
 
 
@@ -34,6 +34,17 @@ def build_parser() -> argparse.ArgumentParser:
     browser_draft = sub.add_parser("browser-draft-filled")
     browser_draft.add_argument("--video-url", required=True)
     browser_draft.add_argument("--screenshot-path")
+
+    campaign = sub.add_parser("campaign-upsert")
+    campaign.add_argument("--slug", required=True)
+    campaign.add_argument("--name", required=True)
+    campaign.add_argument("--keywords", required=True, help="Comma-separated keyword list")
+    campaign.add_argument("--reply", required=True)
+
+    match = sub.add_parser("match")
+    match.add_argument("--campaign", required=True)
+
+    sub.add_parser("next-review")
 
     sub.add_parser("browser-events")
     sub.add_parser("next")
@@ -84,6 +95,19 @@ def run(argv: list[str] | None = None) -> str:
             },
             ensure_ascii=False,
         )
+
+
+    if args.command == "campaign-upsert":
+        keywords = tuple(keyword.strip() for keyword in args.keywords.split(",") if keyword.strip())
+        store.upsert_campaign(Campaign(slug=args.slug, name=args.name, keywords=keywords, reply_template=args.reply))
+        return json.dumps({"ok": True, "slug": args.slug}, ensure_ascii=False)
+
+    if args.command == "match":
+        result = store.match_campaign(args.campaign)
+        return json.dumps({"ok": True, **result}, ensure_ascii=False)
+
+    if args.command == "next-review":
+        return json.dumps({"ok": True, "item": store.next_review_item()}, ensure_ascii=False)
 
     if args.command == "browser-events":
         return json.dumps({"ok": True, "items": store.recent_browser_events()}, ensure_ascii=False)
