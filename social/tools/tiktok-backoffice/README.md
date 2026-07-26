@@ -82,6 +82,29 @@ not to automate drag gestures blindly or claim discovery succeeded.
 ## Campaign review flow
 
 
+
+## Profile video discovery
+
+`discover-videos` registers recent videos from a TikTok profile. Direct HTTP
+fetch can return zero on VPS/headless IPs because TikTok renders/blocks profile
+grids dynamically; in that case, use the Hermes/Camofox browser to open the
+profile and pass a saved HTML/snapshot file to the same parser.
+
+```bash
+# Best-effort direct profile fetch
+uv run tiktok-backoffice discover-videos --profile @dupflodev
+
+# Deterministic fallback from a saved profile HTML/snapshot
+uv run tiktok-backoffice discover-videos \
+  --profile @dupflodev \
+  --html-file /path/to/profile.html
+```
+
+Discovery is idempotent: existing videos are not duplicated. It extracts the
+TikTok `video_id` from URLs and stores captions when available from image alt or
+accessibility labels. After discovery, run `suggest-video-campaigns` to propose
+caption-keyword mappings.
+
 ## Video/campaign registry
 
 Use the video registry to avoid asking for TikTok IDs every time. Videos can be

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from app.config import Settings
+from app.discovery import discover_profile_videos
 from app.keyword import contains_keyword
 from app.models import Campaign, ReplyDraft, ReviewItemStatus, TikTokComment, TikTokVideo
 from app.store import TikTokBackofficeStore
@@ -15,6 +16,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", type=Path, default=None)
     sub = parser.add_subparsers(dest="command", required=True)
 
+
+
+    discover = sub.add_parser("discover-videos")
+    discover.add_argument("--profile", required=True)
+    discover.add_argument("--html-file")
 
     add_video = sub.add_parser("add-video")
     add_video.add_argument("--video-url", required=True)
@@ -98,6 +104,12 @@ def run(argv: list[str] | None = None) -> str:
     settings = Settings()
     store = TikTokBackofficeStore(args.db or settings.tiktok_backoffice_db)
 
+
+
+    if args.command == "discover-videos":
+        videos = discover_profile_videos(profile=args.profile, html_file=args.html_file)
+        added = sum(1 for video in videos if store.add_video(video))
+        return json.dumps({"ok": True, "profile": args.profile if args.profile.startswith("@") else "@" + args.profile, "found": len(videos), "added": added}, ensure_ascii=False)
 
     if args.command == "add-video":
         changed = store.add_video(TikTokVideo(video_url=args.video_url, video_id=args.video_id, author=args.author, caption=args.caption))
