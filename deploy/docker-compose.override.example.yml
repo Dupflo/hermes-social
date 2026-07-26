@@ -1,0 +1,16 @@
+# Per-VPS overrides — copy to docker-compose.override.yml (gitignored) and
+# adapt. compose merges it over docker-compose.yml automatically.
+#
+# Example below: the main VPS, where the Hermes agent's data volume already
+# holds the meta-webhook state (.env renewed by the agent's cron job, sqlite
+# dedup DB). Code runs from this repo checkout; state stays in the volume the
+# agent can reach. deploy/.env is a symlink to the same .env file there.
+
+services:
+  meta-webhook:
+    volumes:
+      # App re-reads .env from its workdir — point it at the state copy the
+      # agent's renew-meta-tokens cron keeps fresh. Restart applies renewal.
+      - /docker/hermes-agent-bg0q/data/meta-comment-dm-automation/.env:/app/.env
+      # Same sqlite file as before the migration — no data copy, no divergence.
+      - /docker/hermes-agent-bg0q/data/meta-comment-dm-automation/data:/app/data

@@ -13,6 +13,10 @@ credentials*
 data/
 *.bak
 *.log
+.deploy-trigger
+.pytest_cache/
+deploy/docker-compose.override.yml
+deploy/meta-webhook-data/
 
 # ── OS / editor noise ───────────────────────────────────────────────────────
 .DS_Store

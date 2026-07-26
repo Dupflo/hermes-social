@@ -7,6 +7,8 @@
 # noVNC (6080) and VNC (5901) are bound to 127.0.0.1 only; use an SSH
 # tunnel:  ssh -L 6080:127.0.0.1:6080 root@<vps>  →  http://localhost:6080
 
+name: hermes-social
+
 services:
   hermes:
     image: hermes-social:latest
