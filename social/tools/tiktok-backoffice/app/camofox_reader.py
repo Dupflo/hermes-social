@@ -394,12 +394,76 @@ _COMMENT_EXTRACTION_JS = r'''
     captcha: /captcha|verify|slider|puzzle/i.test(text),
     comments_index: text.indexOf('Comments'),
     related_tab_active: relatedTabActive,
-    body_preview: text.slice(0, 1200),
-    active_right_panel_preview: activeRightPanelText.slice(0, 1200),
+    body_preview: text.slice(0, 5000),
+    active_right_panel_preview: activeRightPanelText.slice(0, 5000),
     comment_nodes: comment_nodes.slice(0, 200)
   };
 })()
 '''
+
+
+
+
+def _video_author_from_url(video_url: str) -> str | None:
+    match = re.search(r"tiktok\.com/@([^/?#]+)/video/", video_url)
+    return "@" + match.group(1) if match else None
+
+
+def _video_id_from_url(video_url: str) -> str | None:
+    match = re.search(r"/video/(\d+)", video_url)
+    return match.group(1) if match else None
+
+
+def _target_video_coherence(video_url: str, dom_result: dict[str, Any], comments: list[dict[str, str]]) -> dict[str, Any]:
+    """Detect TikTok SPA/feed incoherence before ingesting or acting.
+
+    TikTok can leave location.href/title on the requested video while the visible
+    body/right panel belong to a recommended feed video. URL/title alone are not
+    enough; require the target creator handle to be present in the body/panel or
+    at least in extracted comment authors before trusting the result.
+    """
+    target_author = _video_author_from_url(video_url)
+    target_video_id = _video_id_from_url(video_url)
+    loaded_url = str(dom_result.get("url") or "")
+    text_blob = "\n".join(
+        str(dom_result.get(key) or "")
+        for key in ("body_preview", "active_right_panel_preview", "title")
+    )
+    lowered = text_blob.lower()
+    author_token = (target_author or "").lower().lstrip("@")
+    loaded_has_video_id = bool(target_video_id and target_video_id in loaded_url)
+    body_has_author = bool(author_token and author_token in lowered)
+    comments_have_author = bool(
+        author_token
+        and any(author_token in str(item.get("author") or "").lower().lstrip("@") for item in comments)
+    )
+    logged_in = bool(dom_result.get("logged_in"))
+    login_gate = (dom_result.get("logged_in") is False) and bool(re.search(r"\b(Log\s*in|Sign\s*up)\b", str(dom_result.get("body_preview") or ""), re.IGNORECASE))
+
+    # Logged-out gates are handled separately: they are not a cross-video hazard,
+    # but they are still non-actionable.
+    coherent = True
+    reason = None
+    if target_author and loaded_has_video_id and logged_in and not (body_has_author or comments_have_author):
+        coherent = False
+        reason = "target_author_missing_from_loaded_body"
+    return {
+        "coherent": coherent,
+        "reason": reason,
+        "target_author": target_author,
+        "target_video_id": target_video_id,
+        "loaded_url": loaded_url,
+        "loaded_has_video_id": loaded_has_video_id,
+        "body_has_author": body_has_author,
+        "comments_have_author": comments_have_author,
+        "logged_in": logged_in,
+        "login_gate": login_gate,
+    }
+
+
+def _reload_target_video_expression(video_url: str, attempt: int) -> str:
+    url = json.dumps(video_url)
+    return f"location.replace({url} + ({url}.includes('?') ? '&' : '?') + '_hermes_reload={attempt}_' + Date.now()); true"
 
 
 def fetch_comments_from_camofox(
@@ -411,46 +475,74 @@ def fetch_comments_from_camofox(
     wait_seconds: float = 8.0,
 ) -> dict[str, Any]:
     client = CamofoxClient(base_url=base_url, user_id=user_id)
+    activation_result: Any = None
+    activation_errors: list[str] = []
+    dom_result: dict[str, Any] | None = None
+    comments: list[dict[str, str]] = []
+    coherence: dict[str, Any] | None = None
     try:
         tab_id = client.create_tab(session_key=session_key, url=video_url)
         if wait_seconds > 0:
             time.sleep(wait_seconds)
-        activation_errors: list[str] = []
-        activation_result: Any = None
-        for selector in (':nth-match(:text("Comments"), 1)', ':nth-match(:text("Comments"), 2)', 'text=Comments'):
-            try:
-                activation_result = client.click(tab_id=tab_id, selector=selector)
-                activation_result["selector"] = selector
+        for attempt in range(3):
+            activation_errors = []
+            activation_result = None
+            for selector in (':nth-match(:text("Comments"), 1)', ':nth-match(:text("Comments"), 2)', 'text=Comments'):
+                try:
+                    activation_result = client.click(tab_id=tab_id, selector=selector)
+                    activation_result["selector"] = selector
+                    break
+                except Exception as exc:
+                    activation_errors.append(f"{selector}: {exc}")
+                    time.sleep(1.0)
+            if activation_result is None:
+                activation_result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
+                if isinstance(activation_result, dict):
+                    activation_result["fallback"] = "js_click"
+                    activation_result["click_errors"] = activation_errors
+            time.sleep(2.0)
+            raw_dom_result = client.evaluate(tab_id=tab_id, expression=_COMMENT_EXTRACTION_JS)
+            if not isinstance(raw_dom_result, dict):
+                return {"ok": False, "error": "unexpected_camofox_result", "comments": []}
+            dom_result = raw_dom_result
+            comments = extract_comments_from_dom_result(dom_result)
+            coherence = _target_video_coherence(video_url, dom_result, comments)
+            if coherence.get("coherent"):
                 break
-            except Exception as exc:
-                activation_errors.append(f"{selector}: {exc}")
-                time.sleep(1.0)
-        if activation_result is None:
-            activation_result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
-            if isinstance(activation_result, dict):
-                activation_result["fallback"] = "js_click"
-                activation_result["click_errors"] = activation_errors
-        time.sleep(2.0)
-        dom_result = client.evaluate(tab_id=tab_id, expression=_COMMENT_EXTRACTION_JS)
+            if attempt < 2:
+                client.evaluate(tab_id=tab_id, expression=_reload_target_video_expression(video_url, attempt + 1))
+                time.sleep(max(wait_seconds, 6.0))
     except urllib.error.URLError as exc:
         return {"ok": False, "error": "camofox_unreachable", "detail": str(exc), "comments": []}
     except Exception as exc:
         return {"ok": False, "error": "camofox_fetch_failed", "detail": str(exc), "comments": []}
-    if not isinstance(dom_result, dict):
+    if dom_result is None:
         return {"ok": False, "error": "unexpected_camofox_result", "comments": []}
-    comments = extract_comments_from_dom_result(dom_result)
+    diagnostics = {
+        "activation": activation_result if isinstance(activation_result, dict) else None,
+        "comment_nodes": len(dom_result.get("comment_nodes") or []),
+        "comments_index": dom_result.get("comments_index"),
+        "related_tab_active": dom_result.get("related_tab_active"),
+        "title": dom_result.get("title"),
+        "url": dom_result.get("url"),
+        "target_video_coherence": coherence,
+    }
+    if coherence and not coherence.get("coherent"):
+        return {
+            "ok": False,
+            "error": "target_video_incoherent",
+            "detail": coherence.get("reason"),
+            "video_url": video_url,
+            "logged_in": bool(dom_result.get("logged_in")),
+            "captcha": bool(dom_result.get("captcha")),
+            "comments": [],
+            "diagnostics": diagnostics,
+        }
     return {
         "ok": True,
         "video_url": video_url,
         "logged_in": bool(dom_result.get("logged_in")),
         "captcha": bool(dom_result.get("captcha")),
         "comments": comments,
-        "diagnostics": {
-            "activation": activation_result if isinstance(activation_result, dict) else None,
-            "comment_nodes": len(dom_result.get("comment_nodes") or []),
-            "comments_index": dom_result.get("comments_index"),
-            "related_tab_active": dom_result.get("related_tab_active"),
-            "title": dom_result.get("title"),
-            "url": dom_result.get("url"),
-        },
+        "diagnostics": diagnostics,
     }

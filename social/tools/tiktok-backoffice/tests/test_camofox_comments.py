@@ -195,3 +195,78 @@ Tu passes de Claude Code à Codex ? Commente MIGRATION 👇
     }
 
     assert extract_comments_from_dom_result(result) == []
+
+
+
+def test_target_video_coherence_rejects_recommended_video_dom_under_target_url():
+    from app.camofox_reader import _target_video_coherence
+
+    dom_result = {
+        "url": "https://www.tiktok.com/@dupflodev/video/7657941429938949399",
+        "title": "(26)🪐 J’ai ajouté ce qui manquait : de vrais assets 3D. Et là, ça change ... | TikTok",
+        "logged_in": True,
+        "body_preview": """
+TikTok
+Messages
+We're having trouble playing this video. Please refresh and try again.
+Comments
+You may like
+#finalworldcup #spainvsfrance
+princesleono8
+1.2M
+""",
+        "active_right_panel_preview": "princesleono8 1.2M · 6d ago #finalworldcup",
+    }
+
+    coherence = _target_video_coherence(
+        "https://www.tiktok.com/@dupflodev/video/7657941429938949399",
+        dom_result,
+        [],
+    )
+
+    assert coherence["coherent"] is False
+    assert coherence["reason"] == "target_author_missing_from_loaded_body"
+    assert coherence["loaded_has_video_id"] is True
+    assert coherence["body_has_author"] is False
+
+
+def test_target_video_coherence_accepts_target_author_in_body():
+    from app.camofox_reader import _target_video_coherence
+
+    dom_result = {
+        "url": "https://www.tiktok.com/@dupflodev/video/7657941429938949399",
+        "title": "Higgsfield | TikTok",
+        "logged_in": True,
+        "body_preview": "dupflodev · 7-2 Commente HIGGSFIELD",
+        "active_right_panel_preview": "13 comments Elsa higgsfield",
+    }
+
+    coherence = _target_video_coherence(
+        "https://www.tiktok.com/@dupflodev/video/7657941429938949399",
+        dom_result,
+        [],
+    )
+
+    assert coherence["coherent"] is True
+    assert coherence["body_has_author"] is True
+
+
+def test_target_video_coherence_accepts_target_author_from_extracted_comments():
+    from app.camofox_reader import _target_video_coherence
+
+    dom_result = {
+        "url": "https://www.tiktok.com/@dupflodev/video/7657941429938949399",
+        "title": "Higgsfield | TikTok",
+        "logged_in": True,
+        "body_preview": "TikTok Messages Comments",
+        "active_right_panel_preview": "13 comments",
+    }
+
+    coherence = _target_video_coherence(
+        "https://www.tiktok.com/@dupflodev/video/7657941429938949399",
+        dom_result,
+        [{"author": "@dupflodev", "text": "Creator reply"}],
+    )
+
+    assert coherence["coherent"] is True
+    assert coherence["comments_have_author"] is True
