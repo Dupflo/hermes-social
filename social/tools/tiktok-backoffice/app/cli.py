@@ -6,7 +6,7 @@ from pathlib import Path
 
 from app.config import Settings
 from app.keyword import contains_keyword
-from app.models import Campaign, ReplyDraft, TikTokComment
+from app.models import Campaign, ReplyDraft, ReviewItemStatus, TikTokComment
 from app.store import TikTokBackofficeStore
 
 
@@ -45,6 +45,16 @@ def build_parser() -> argparse.ArgumentParser:
     match.add_argument("--campaign", required=True)
 
     sub.add_parser("next-review")
+
+    approve = sub.add_parser("approve-draft")
+    approve.add_argument("--review-id", type=int, required=True)
+
+    ignore = sub.add_parser("ignore-review")
+    ignore.add_argument("--review-id", type=int, required=True)
+    ignore.add_argument("--reason", default=None)
+
+    review = sub.add_parser("review")
+    review.add_argument("--review-id", type=int, required=True)
 
     sub.add_parser("browser-events")
     sub.add_parser("next")
@@ -108,6 +118,18 @@ def run(argv: list[str] | None = None) -> str:
 
     if args.command == "next-review":
         return json.dumps({"ok": True, "item": store.next_review_item()}, ensure_ascii=False)
+
+
+    if args.command == "approve-draft":
+        store.set_review_status(args.review_id, ReviewItemStatus.APPROVED_FOR_DRAFT)
+        return json.dumps({"ok": True, "review_id": args.review_id, "status": ReviewItemStatus.APPROVED_FOR_DRAFT}, ensure_ascii=False)
+
+    if args.command == "ignore-review":
+        store.set_review_status(args.review_id, ReviewItemStatus.IGNORED, reason=args.reason)
+        return json.dumps({"ok": True, "review_id": args.review_id, "status": ReviewItemStatus.IGNORED}, ensure_ascii=False)
+
+    if args.command == "review":
+        return json.dumps({"ok": True, "item": store.get_review_item(args.review_id)}, ensure_ascii=False)
 
     if args.command == "browser-events":
         return json.dumps({"ok": True, "items": store.recent_browser_events()}, ensure_ascii=False)

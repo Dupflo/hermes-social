@@ -45,6 +45,15 @@ uv run tiktok-backoffice match --campaign proxy
 
 # Fetch the next campaign/comment item for Hermes/Kanban review
 uv run tiktok-backoffice next-review
+
+# Approve a review item for browser draft preparation (still no publish)
+uv run tiktok-backoffice approve-draft --review-id 1
+
+# Ignore a review item with an operator reason
+uv run tiktok-backoffice ignore-review --review-id 1 --reason "hors sujet"
+
+# Inspect one review item
+uv run tiktok-backoffice review --review-id 1
 ```
 
 `draft` records a draft locally and returns the exact text to review. It does
@@ -79,3 +88,13 @@ action.
 TikTok Open API does not currently provide a public Meta-like comment webhook,
 public comment reply endpoint, or DM/private-reply endpoint for standard social
 videos. This tool is therefore read/poll + review + browser-assisted action.
+
+Review decisions are separate from publishing:
+
+- `approve-draft` moves a review item to `approved_for_draft`; a future browser
+  worker may fill the TikTok composer from this state, but must still stop before
+  `Post`.
+- `ignore-review` records a human/operator reason and removes the item from the
+  pending queue.
+- Publishing will require a later explicit `approved_for_publish` state and a
+  separate guarded command; it is intentionally not implemented here.

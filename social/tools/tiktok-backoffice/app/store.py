@@ -128,6 +128,46 @@ class TikTokBackofficeStore:
                 created += cursor.rowcount
         return {"matched": len(matched_comment_ids), "created_drafts": created}
 
+
+    def get_review_item(self, review_id: int) -> dict | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    ri.id,
+                    ri.comment_id,
+                    ri.campaign_slug,
+                    ri.matched_keyword,
+                    ri.reply_text,
+                    ri.status,
+                    ri.screenshot_path,
+                    ri.failure_reason,
+                    ri.created_at,
+                    c.video_url,
+                    c.video_id,
+                    c.author,
+                    c.text AS comment_text
+                FROM tiktok_review_items ri
+                JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+                WHERE ri.id = ?
+                """,
+                (review_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def set_review_status(self, review_id: int, status: ReviewItemStatus, *, reason: str | None = None) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE tiktok_review_items
+                SET status = ?, failure_reason = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status, reason, review_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"Unknown review_id: {review_id}")
+
     def next_review_item(self) -> dict | None:
         with self._connect() as connection:
             row = connection.execute(
