@@ -29,3 +29,5 @@ node_modules/
 
 # Runtime browser persistence
 deploy/camofox-data/
+# ── Hermes local agent workspace ─────────────────────────────────────────────
+.hermes/
