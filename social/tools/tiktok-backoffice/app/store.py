@@ -13,6 +13,29 @@ def _video_id_from_url(video_url: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _caption_has_comment_cta_keyword(caption: str, keyword: str) -> bool:
+    # Avoid false mappings from generic words in the description. We only trust
+    # the short requested term immediately after a CTA like "Commente proxy".
+    normalized = caption or ""
+    cta_markers = ["commente", "commentes", "commenter"]
+    lowered = normalized.lower()
+    for marker in cta_markers:
+        start = 0
+        while True:
+            idx = lowered.find(marker, start)
+            if idx == -1:
+                break
+            after = normalized[idx + len(marker) : idx + len(marker) + 80]
+            # Stop before explanatory text ("→ je t'envoie...", hashtags, next sentence).
+            requested = re.split(r"(?:→|👉|👇|#|\.|\?|!|\n|\r)", after, maxsplit=1)[0]
+            # Drop common continuation after the requested keyword: "proxy et je...".
+            requested = re.split(r"\b(?:et|puis|pour|afin|si|tu|je|j[’'])\b", requested, maxsplit=1, flags=re.IGNORECASE)[0]
+            if contains_keyword(requested, keyword):
+                return True
+            start = idx + len(marker)
+    return False
+
+
 class TikTokBackofficeStore:
     def __init__(self, database: str | Path):
         self.database = Path(database)
@@ -73,6 +96,9 @@ class TikTokBackofficeStore:
     def suggest_video_campaigns(self) -> int:
         suggested = 0
         with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM tiktok_video_campaigns WHERE source = 'caption_keyword' AND approved = 0"
+            )
             videos = connection.execute(
                 "SELECT video_url, caption FROM tiktok_videos WHERE active = 1 ORDER BY discovered_at DESC"
             ).fetchall()
@@ -85,7 +111,7 @@ class TikTokBackofficeStore:
                     campaign = self.get_campaign(campaign_row["slug"])
                     if campaign is None:
                         continue
-                    if any(contains_keyword(caption, keyword) for keyword in campaign["keywords"]):
+                    if any(_caption_has_comment_cta_keyword(caption, keyword) for keyword in campaign["keywords"]):
                         cursor = connection.execute(
                             """
                             INSERT INTO tiktok_video_campaigns (video_url, campaign_slug, source, confidence, approved)
@@ -206,6 +232,19 @@ class TikTokBackofficeStore:
                 "INSERT INTO tiktok_campaign_keywords (campaign_slug, keyword) VALUES (?, ?)",
                 [(campaign.slug, keyword) for keyword in keywords],
             )
+
+
+    def list_campaigns(self) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT slug, name, reply_template, active FROM tiktok_campaigns ORDER BY slug").fetchall()
+            campaigns = [dict(row) for row in rows]
+            for campaign in campaigns:
+                keyword_rows = connection.execute(
+                    "SELECT keyword FROM tiktok_campaign_keywords WHERE campaign_slug = ? ORDER BY keyword",
+                    (campaign["slug"],),
+                ).fetchall()
+                campaign["keywords"] = [row["keyword"] for row in keyword_rows]
+        return campaigns
 
     def get_campaign(self, slug: str) -> dict | None:
         with self._connect() as connection:

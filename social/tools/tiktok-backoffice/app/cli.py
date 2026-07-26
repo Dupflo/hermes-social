@@ -7,6 +7,7 @@ from pathlib import Path
 from app.config import Settings
 from app.discovery import discover_profile_videos
 from app.keyword import contains_keyword
+from app.kanban_import import DEFAULT_KANBAN_DB, sync_meta_campaigns_to_tiktok
 from app.models import Campaign, ReplyDraft, ReviewItemStatus, TikTokComment, TikTokVideo
 from app.store import TikTokBackofficeStore
 
@@ -63,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
     browser_draft = sub.add_parser("browser-draft-filled")
     browser_draft.add_argument("--video-url", required=True)
     browser_draft.add_argument("--screenshot-path")
+
+
+    sync_kanban = sub.add_parser("sync-kanban-campaigns")
+    sync_kanban.add_argument("--kanban-db", type=Path, default=DEFAULT_KANBAN_DB)
+
+    sub.add_parser("list-campaigns")
 
     campaign = sub.add_parser("campaign-upsert")
     campaign.add_argument("--slug", required=True)
@@ -167,6 +174,14 @@ def run(argv: list[str] | None = None) -> str:
             ensure_ascii=False,
         )
 
+
+
+    if args.command == "sync-kanban-campaigns":
+        synced = sync_meta_campaigns_to_tiktok(store, args.kanban_db)
+        return json.dumps({"ok": True, "synced": synced}, ensure_ascii=False)
+
+    if args.command == "list-campaigns":
+        return json.dumps({"ok": True, "items": store.list_campaigns()}, ensure_ascii=False)
 
     if args.command == "campaign-upsert":
         keywords = tuple(keyword.strip() for keyword in args.keywords.split(",") if keyword.strip())

@@ -105,6 +105,36 @@ TikTok `video_id` from URLs and stores captions when available from image alt or
 accessibility labels. After discovery, run `suggest-video-campaigns` to propose
 caption-keyword mappings.
 
+
+## Import Meta Kanban campaigns into TikTok
+
+TikTok campaign sync imports active resource-delivery campaign cards from the
+Meta campaign Kanban into local TikTok campaigns. It copies only safe campaign
+metadata: name, keywords, active flag, and the TikTok public confirmation text.
+It does **not** copy private resource links into public replies.
+
+```bash
+# Import active Meta/Kanban resource campaigns into the TikTok local DB
+uv run tiktok-backoffice sync-kanban-campaigns
+
+# Inspect imported TikTok campaigns
+uv run tiktok-backoffice list-campaigns
+
+# Then propose video/campaign mappings from CTA captions like “Commente proxy”
+uv run tiktok-backoffice suggest-video-campaigns
+```
+
+The default TikTok public reply template for imported campaigns is:
+
+```text
+Je viens de t’envoyer le lien en message privé
+```
+
+`sync-kanban-campaigns` ignores template cards, inactive cards, archived tasks,
+cards without keywords, and cards without a private resource/DM configuration.
+`send/comment` delivery remains separate and gated; this import only prepares
+review/mapping data.
+
 ## Video/campaign registry
 
 Use the video registry to avoid asking for TikTok IDs every time. Videos can be
@@ -185,7 +215,8 @@ approval instead of inventing a fallback.
 Suggested video/campaign links:
 
 - `suggest-video-campaigns` scans active videos with captions against active
-  campaign keywords.
+  campaign keywords, but only trusts keywords appearing in short CTA segments like
+  `Commente proxy`; generic caption mentions are ignored.
 - Suggestions are stored as `source=caption_keyword`, `confidence=0.8`,
   `approved=0`; they are not used as trusted campaign mappings until approved.
 - `approve-video-campaign` promotes a suggestion to `source=operator_approved`,
