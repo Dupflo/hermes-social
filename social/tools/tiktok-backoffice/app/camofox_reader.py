@@ -252,6 +252,14 @@ _COMMENT_EXTRACTION_JS = r'''
     const usernameNode = container.querySelector('[data-e2e*="comment-username"], [class*="DivUsernameContentWrapper"]');
     return clean(usernameNode?.innerText || usernameNode?.textContent || '');
   }
+  function stableHash(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(16).padStart(8, '0');
+  }
   for (const container of containers) {
     const txt = cleanCommentText(container);
     if (!txt || txt.length < 2 || txt.length > 500 || badTexts.has(txt) || /^\d+[KkMm]?$/.test(txt)) continue;
@@ -259,8 +267,8 @@ _COMMENT_EXTRACTION_JS = r'''
     const author = authorFrom(container);
     const display = authorDisplayFrom(container);
     if (display && txt === display) continue;
-    const r = container.getBoundingClientRect();
-    const comment_id = commentIdFrom(container) || `${author || display || 'unknown'}:${Math.round(r.y)}:${txt.slice(0,40)}`;
+    const stableKey = `${location.pathname}:${author || display || 'unknown'}:${txt}`;
+    const comment_id = commentIdFrom(container) || `${author || display || 'unknown'}:${stableHash(stableKey)}`;
     const key = `${author || display || ''}␟${txt}␟${comment_id || ''}`;
     if (seen.has(key)) continue;
     seen.add(key);

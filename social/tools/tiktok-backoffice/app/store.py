@@ -287,17 +287,33 @@ class TikTokBackofficeStore:
                         created_time=raw.get("created_time") or raw.get("create_time") or raw.get("timestamp"),
                     )
                 comment_id = str(comment_id).strip()
-                cursor = connection.execute(
+                existing = connection.execute(
                     """
-                    INSERT INTO tiktok_comments (video_url, video_id, comment_id, author, text, status)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(comment_id) DO NOTHING
+                    SELECT comment_id
+                    FROM tiktok_comments
+                    WHERE video_url = ?
+                      AND COALESCE(author, '') = COALESCE(?, '')
+                      AND text = ?
+                    ORDER BY created_at ASC, comment_id ASC
+                    LIMIT 1
                     """,
-                    (video_url, video_id, comment_id, author, text, ReviewStatus.PENDING_REVIEW),
-                )
-                inserted = cursor.rowcount > 0
-                if inserted:
-                    ingested += 1
+                    (video_url, author, text),
+                ).fetchone()
+                if existing is not None:
+                    comment_id = existing["comment_id"]
+                    inserted = False
+                else:
+                    cursor = connection.execute(
+                        """
+                        INSERT INTO tiktok_comments (video_url, video_id, comment_id, author, text, status)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(comment_id) DO NOTHING
+                        """,
+                        (video_url, video_id, comment_id, author, text, ReviewStatus.PENDING_REVIEW),
+                    )
+                    inserted = cursor.rowcount > 0
+                    if inserted:
+                        ingested += 1
                 if not inserted:
                     continue
                 for campaign in campaigns:

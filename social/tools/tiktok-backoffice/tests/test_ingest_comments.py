@@ -46,6 +46,22 @@ def test_ingest_comments_is_idempotent_and_uses_fingerprint_without_id(tmp_path)
     assert items[0]["comment_id"].startswith("fp:")
 
 
+def test_ingest_comments_dedupes_when_extractor_id_changes(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    _setup_video_campaign(db)
+    first = tmp_path / "first.json"
+    second = tmp_path / "second.json"
+    first.write_text(json.dumps([{"id": "@alice:100:proxy", "author": "@alice", "text": "proxy"}]))
+    second.write_text(json.dumps([{"id": "@alice:stablehash", "author": "@alice", "text": "proxy"}]))
+
+    created = json.loads(run(["--db", str(db), "ingest-comments", "--video-url", "https://www.tiktok.com/@dupflodev/video/123", "--json-file", str(first)]))
+    repeated = json.loads(run(["--db", str(db), "ingest-comments", "--video-url", "https://www.tiktok.com/@dupflodev/video/123", "--json-file", str(second)]))
+
+    assert created == {"ok": True, "ingested": 1, "created_reviews": 1}
+    assert repeated == {"ok": True, "ingested": 0, "created_reviews": 0}
+    assert len(json.loads(run(["--db", str(db), "list"]))["items"]) == 1
+
+
 def test_ingest_comments_ignores_unapproved_video_campaign(tmp_path):
     db = tmp_path / "tiktok.sqlite3"
     run(["--db", str(db), "add-video", "--video-url", "https://www.tiktok.com/@dupflodev/video/123", "--caption", "Commente proxy"])
