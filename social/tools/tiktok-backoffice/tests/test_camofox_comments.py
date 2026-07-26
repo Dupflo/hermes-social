@@ -33,6 +33,29 @@ def test_extract_dom_comments_filters_recommendations_and_navigation():
     ]
 
 
+
+def test_extract_dom_comments_filters_related_tab_recommendation_cards():
+    from app.camofox_reader import extract_comments_from_dom_result
+
+    result = {
+        "url": "https://www.tiktok.com/@dupflodev/video/123",
+        "logged_in": False,
+        "related_tab_active": True,
+        "comment_nodes": [
+            {
+                "author": "@dupflodev",
+                "text": "Un repo GitHub compile les system prompts leakés de Claude, ChatGPT, Cursor, v0. Et partout le même commentaire : plus besoin de payer.",
+                "comment_id": "css-649dsf-5e6d46e3--DivInfoContainer e9pwkrg3",
+            },
+            {"author": "@alice", "text": "proxy stp", "comment_id": "real-c1"},
+        ],
+    }
+
+    comments = extract_comments_from_dom_result(result)
+
+    assert comments == [{"id": "real-c1", "author": "@alice", "text": "proxy stp"}]
+
+
 def test_fetch_comments_camofox_cli_can_ingest_without_publishing(tmp_path, monkeypatch):
     db = tmp_path / "tiktok.sqlite3"
     _setup_video_campaign(db)

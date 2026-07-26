@@ -38,6 +38,20 @@ def _clean_comment_text(text: Any) -> str:
     return " ".join(str(text or "").split()).strip()
 
 
+def _looks_like_recommendation_node(node: dict[str, Any]) -> bool:
+    blob = " ".join(str(node.get(key) or "") for key in ("id", "comment_id", "class", "cls", "e2e", "container_class"))
+    return bool(
+        blob
+        and any(marker in blob.lower() for marker in (
+            "recommend-list-item",
+            "relatedtab",
+            "divinfocontainer",
+            "e9pwkrg",
+            "one-column-item",
+        ))
+    )
+
+
 def _looks_like_comment(text: str) -> bool:
     lowered = text.lower().strip()
     if not lowered or lowered in _NAVIGATION_TEXT:
@@ -47,6 +61,14 @@ def _looks_like_comment(text: str) -> bool:
     if len(text) > 500:
         return False
     if text.isdigit():
+        return False
+    if lowered in {"reply", "add comment..."}:
+        return False
+    if lowered.startswith("view ") and "repl" in lowered:
+        return False
+    if " ago reply" in lowered or lowered.endswith(" ago"):
+        return False
+    if lowered.endswith(" comments") and text.split()[0].isdigit():
         return False
     if "you may like" in lowered:
         return False
@@ -67,13 +89,15 @@ def extract_comments_from_dom_result(dom_result: dict[str, Any]) -> list[dict[st
     for node in dom_result.get("comment_nodes") or []:
         if not isinstance(node, dict):
             continue
+        if _looks_like_recommendation_node(node):
+            continue
         text = _clean_comment_text(node.get("text"))
         if not _looks_like_comment(text):
             continue
         author = _normalize_author(node.get("author"))
         comment_id = node.get("comment_id") or node.get("id")
         comment_id = str(comment_id).strip() if comment_id is not None and str(comment_id).strip() else None
-        key = (author, text, comment_id)
+        key = (author, text, None)
         if key in seen:
             continue
         seen.add(key)
@@ -112,6 +136,47 @@ class CamofoxClient:
             raise RuntimeError(f"Camofox evaluate failed: {response!r}")
         return response.get("result")
 
+    def click(self, *, tab_id: str, selector: str) -> dict[str, Any]:
+        response = self._request_json("POST", f"/tabs/{tab_id}/click", {"userId": self.user_id, "selector": selector})
+        if not response.get("ok"):
+            raise RuntimeError(f"Camofox click failed: {response!r}")
+        return response
+
+
+_ACTIVATE_COMMENTS_TAB_JS = r'''
+(() => {
+  function clean(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+  function visible(el) {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.x >= 0 && r.y >= 0;
+  }
+  const rightPanel = Array.from(document.querySelectorAll('div, aside, section'))
+    .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent)}))
+    .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.width > 200 && /Comments/.test(x.text))
+    .sort((a, b) => (b.r.width * b.r.height) - (a.r.width * a.r.height))[0]?.el;
+  const scope = rightPanel || document;
+  const candidates = Array.from(scope.querySelectorAll('button, [role=button], [role=tab], div, span'))
+    .filter(visible)
+    .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent), aria: el.getAttribute('aria-label') || '', role: el.getAttribute('role') || '', cls: String(el.className || '')}))
+    .filter(x => x.text === 'Comments' || /Comments/.test(x.aria));
+  const tab = candidates
+    .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.y < 180)
+    .sort((a, b) => a.r.x - b.r.x)[0] || candidates[0];
+  if (tab) {
+    tab.el.scrollIntoView({block: 'center', inline: 'center'});
+    tab.el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
+    tab.el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));
+    tab.el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));
+    tab.el.click();
+  }
+  return {
+    clicked: Boolean(tab),
+    target: tab ? {text: tab.text, aria: tab.aria, role: tab.role, cls: tab.cls.slice(0, 120), rect: {x: Math.round(tab.r.x), y: Math.round(tab.r.y), w: Math.round(tab.r.width), h: Math.round(tab.r.height)}} : null,
+    right_panel_text: clean((rightPanel || document.body).innerText || '').slice(0, 800),
+  };
+})()
+'''
+
 
 _COMMENT_EXTRACTION_JS = r'''
 (() => {
@@ -133,41 +198,73 @@ _COMMENT_EXTRACTION_JS = r'''
     return null;
   }
   function commentIdFrom(el) {
-    const scoped = el.closest('[id], [data-id], [data-comment-id], [data-e2e*="comment"]') || el;
-    for (const attr of ['data-comment-id','data-id','id']) {
+    const scoped = el.closest('[data-id], [data-comment-id], [data-e2e*="comment"]') || el;
+    for (const attr of ['data-comment-id','data-id']) {
       const value = scoped.getAttribute?.(attr);
       if (value && value.length > 3 && value.length < 100) return value;
     }
     return null;
   }
+  function inRightPanel(el) {
+    const r = el.getBoundingClientRect();
+    return r.x > window.innerWidth * 0.55;
+  }
+  function isRecommendation(el) {
+    const blob = [
+      el.id || '',
+      String(el.className || ''),
+      el.getAttribute?.('data-e2e') || '',
+      clean(el.innerText || el.textContent),
+    ].join(' ');
+    return /recommend-list-item|RelatedTab|You may like|DivRelatedTab|DivInfoContainer|e9pwkrg|recommend/i.test(blob)
+      || Boolean(el.closest('[data-e2e="recommend-list-item-container"], [data-e2e="feed-video"], article[id^="one-column-item"]'));
+  }
+  const activeRightPanelText = clean(Array.from(document.querySelectorAll('div, aside, section'))
+    .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent)}))
+    .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.width > 200 && x.r.height > 150)
+    .sort((a, b) => (b.r.width * b.r.height) - (a.r.width * a.r.height))[0]?.text || '');
+  const relatedTabActive = /You may like/.test(activeRightPanelText) && /recommend-list-item|DivRelatedTab|e9pwkrg|recommend/i.test(document.body.innerHTML);
   const containerSelector = [
+    '[class*="DivCommentItemWrapper"]',
     '[data-e2e*="comment-item"]',
-    '[data-e2e*="comment-level"]',
-    '[class*="CommentItem"]',
-    '[class*="comment-item" i]',
-    '[class*="DivComment"]'
+    '[data-e2e*="comment-level"]'
   ].join(',');
-  const containers = Array.from(document.querySelectorAll(containerSelector))
-    .filter(e => !e.closest('#app-header, [data-e2e="inbox-notifications"], [data-e2e="recommend-list-item-container"], [data-e2e="feed-video"]'));
+  const containers = relatedTabActive ? [] : Array.from(document.querySelectorAll(containerSelector))
+    .filter(e => inRightPanel(e))
+    .filter(e => !isRecommendation(e))
+    .filter(e => !e.closest('#app-header, [data-e2e="inbox-notifications"]'));
   const comment_nodes = [];
   const seen = new Set();
+  function cleanCommentText(container) {
+    const content = container.querySelector('[class*="DivCommentContentWrapper"]') || container;
+    const usernameNode = content.querySelector('[data-e2e*="comment-username"], [class*="DivUsernameContentWrapper"]');
+    const username = clean(usernameNode?.innerText || usernameNode?.textContent || '');
+    let txt = clean(content.innerText || content.textContent);
+    if (username && txt.startsWith(username)) txt = clean(txt.slice(username.length));
+    txt = clean(txt
+      .replace(/\s+(?:\d+[smhdw]|\d+-\d+|Yesterday|Today)\s+ago\s+Reply(?:\s+\d+)?(?:\s+View\s+\d+\s+repl(?:y|ies))?\s*$/i, '')
+      .replace(/\s+Reply(?:\s+\d+)?(?:\s+View\s+\d+\s+repl(?:y|ies))?\s*$/i, '')
+      .replace(/\s+View\s+\d+\s+repl(?:y|ies)\s*$/i, '')
+    );
+    return txt;
+  }
+  function authorDisplayFrom(container) {
+    const usernameNode = container.querySelector('[data-e2e*="comment-username"], [class*="DivUsernameContentWrapper"]');
+    return clean(usernameNode?.innerText || usernameNode?.textContent || '');
+  }
   for (const container of containers) {
-    const candidates = Array.from(container.querySelectorAll('p, span, div')).concat([container]);
-    const texts = candidates.map(e => clean(e.innerText || e.textContent))
-      .filter(txt => txt && txt.length >= 2 && txt.length <= 500 && !badTexts.has(txt) && !/^\d+[KkMm]?$/.test(txt))
-      .filter(txt => !/You may like|We're having trouble playing|© 2026 TikTok/i.test(txt))
-      .filter(txt => !['search','upload','profile','notifications','system notifications','following accounts','post video','select language','english'].includes(txt.toLowerCase()))
-      .filter(txt => !/^· /.test(txt) && !/ ago$/.test(txt));
-    if (!texts.length) continue;
+    const txt = cleanCommentText(container);
+    if (!txt || txt.length < 2 || txt.length > 500 || badTexts.has(txt) || /^\d+[KkMm]?$/.test(txt)) continue;
+    if (/You may like|We're having trouble playing|© 2026 TikTok|^Reply$|^View \d+ repl/i.test(txt)) continue;
     const author = authorFrom(container);
-    const comment_id = commentIdFrom(container);
-    for (const txt of texts) {
-      if (author && txt.replace(/^@/, '') === author.replace(/^@/, '')) continue;
-      const key = `${author || ''}␟${txt}␟${comment_id || ''}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      comment_nodes.push({author, text: txt, comment_id});
-    }
+    const display = authorDisplayFrom(container);
+    if (display && txt === display) continue;
+    const r = container.getBoundingClientRect();
+    const comment_id = commentIdFrom(container) || `${author || display || 'unknown'}:${Math.round(r.y)}:${txt.slice(0,40)}`;
+    const key = `${author || display || ''}␟${txt}␟${comment_id || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    comment_nodes.push({author, display_author: display, text: txt, comment_id, container_class: String(container.className || '').slice(0, 160)});
   }
   return {
     url: location.href,
@@ -175,7 +272,9 @@ _COMMENT_EXTRACTION_JS = r'''
     logged_in: text.includes('Messages') && !text.includes('Log in to follow creators'),
     captcha: /captcha|verify|slider|puzzle/i.test(text),
     comments_index: text.indexOf('Comments'),
+    related_tab_active: relatedTabActive,
     body_preview: text.slice(0, 1200),
+    active_right_panel_preview: activeRightPanelText.slice(0, 1200),
     comment_nodes: comment_nodes.slice(0, 200)
   };
 })()
@@ -195,6 +294,22 @@ def fetch_comments_from_camofox(
         tab_id = client.create_tab(session_key=session_key, url=video_url)
         if wait_seconds > 0:
             time.sleep(wait_seconds)
+        activation_errors: list[str] = []
+        activation_result: Any = None
+        for selector in (':nth-match(:text("Comments"), 1)', ':nth-match(:text("Comments"), 2)', 'text=Comments'):
+            try:
+                activation_result = client.click(tab_id=tab_id, selector=selector)
+                activation_result["selector"] = selector
+                break
+            except Exception as exc:
+                activation_errors.append(f"{selector}: {exc}")
+                time.sleep(1.0)
+        if activation_result is None:
+            activation_result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
+            if isinstance(activation_result, dict):
+                activation_result["fallback"] = "js_click"
+                activation_result["click_errors"] = activation_errors
+        time.sleep(2.0)
         dom_result = client.evaluate(tab_id=tab_id, expression=_COMMENT_EXTRACTION_JS)
     except urllib.error.URLError as exc:
         return {"ok": False, "error": "camofox_unreachable", "detail": str(exc), "comments": []}
@@ -210,8 +325,10 @@ def fetch_comments_from_camofox(
         "captcha": bool(dom_result.get("captcha")),
         "comments": comments,
         "diagnostics": {
+            "activation": activation_result if isinstance(activation_result, dict) else None,
             "comment_nodes": len(dom_result.get("comment_nodes") or []),
             "comments_index": dom_result.get("comments_index"),
+            "related_tab_active": dom_result.get("related_tab_active"),
             "title": dom_result.get("title"),
             "url": dom_result.get("url"),
         },
