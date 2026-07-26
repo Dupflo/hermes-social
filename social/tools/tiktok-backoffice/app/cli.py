@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from app.config import Settings
+from app.camofox_reader import fetch_comments_from_camofox
 from app.discovery import discover_profile_videos
 from app.keyword import contains_keyword
 from app.kanban_import import DEFAULT_KANBAN_DB, sync_meta_campaigns_to_tiktok
@@ -53,6 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
     ingest = sub.add_parser("ingest-comments")
     ingest.add_argument("--video-url", required=True)
     ingest.add_argument("--json-file", type=Path, required=True)
+
+    fetch_camofox = sub.add_parser("fetch-comments-camofox")
+    fetch_camofox.add_argument("--video-url", required=True)
+    fetch_camofox.add_argument("--base-url", default="http://camofox:9377")
+    fetch_camofox.add_argument("--user-id", default="hermes_80317d7dba")
+    fetch_camofox.add_argument("--session-key", default="tiktok-comments-fetch")
+    fetch_camofox.add_argument("--wait-seconds", type=float, default=8.0)
+    fetch_camofox.add_argument("--ingest", action="store_true")
 
     add = sub.add_parser("add-comment")
     add.add_argument("--video-url", required=True)
@@ -158,6 +167,22 @@ def run(argv: list[str] | None = None) -> str:
             return json.dumps({"ok": False, "error": "json_must_be_list_or_comments_object"}, ensure_ascii=False)
         result = store.ingest_comments(video_url=args.video_url, comments=comments)
         return json.dumps({"ok": True, **result}, ensure_ascii=False)
+
+    if args.command == "fetch-comments-camofox":
+        result = fetch_comments_from_camofox(
+            video_url=args.video_url,
+            base_url=args.base_url,
+            user_id=args.user_id,
+            session_key=args.session_key,
+            wait_seconds=args.wait_seconds,
+        )
+        comments = result.get("comments", [])
+        if not result.get("ok"):
+            return json.dumps({**result, "fetched": len(comments)}, ensure_ascii=False)
+        output = {**result, "fetched": len(comments)}
+        if args.ingest:
+            output["ingest"] = store.ingest_comments(video_url=args.video_url, comments=comments)
+        return json.dumps(output, ensure_ascii=False)
 
     if args.command == "add-comment":
         changed = store.add_comment(TikTokComment(video_url=args.video_url, video_id=args.video_id, comment_id=args.comment_id, author=args.author, text=args.text))

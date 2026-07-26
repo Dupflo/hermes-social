@@ -204,6 +204,30 @@ Browser worker integration contract:
   command in this increment.
 
 
+
+## Camofox comment fetcher
+
+`fetch-comments-camofox` uses the existing Hermes/Camofox sidecar to open a TikTok
+video with the persisted logged-in browser session. It is read-only and never
+posts. The command is deliberately conservative: if TikTok only renders the video
+shell, recommendations, or the "We're having trouble playing this video" state,
+it returns `fetched: 0` instead of ingesting false positives.
+
+```bash
+# Read-only diagnostic: no database writes
+uv run tiktok-backoffice fetch-comments-camofox   --video-url 'https://www.tiktok.com/@dupflodev/video/7665295144496762134'
+
+# Optional safe ingestion: stores only comments extracted from explicit comment
+# containers and creates review items for approved video/campaign mappings.
+uv run tiktok-backoffice fetch-comments-camofox   --video-url 'https://www.tiktok.com/@dupflodev/video/7665295144496762134'   --ingest
+```
+
+Validated live behavior on the Dockerized Hermes Social stack: Camofox was
+logged in and CAPTCHA-free, but TikTok did not render real comment containers for
+the tested video; the command returned `comments: []` / `fetched: 0`, so nothing
+was ingested. This is expected safe behavior until noVNC/manual interaction or a
+better TikTok DOM state exposes actual comment items.
+
 ## Poll target and comment ingestion
 
 Once video/campaign mappings are approved, `poll-targets` returns exactly the
