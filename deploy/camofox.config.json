@@ -1,0 +1,20 @@
+{
+  "id": "camofox-browser",
+  "name": "Camofox Browser",
+  "version": "1.6.0",
+  "newPageTimeoutMs": 10000,
+  "plugins": {
+    "youtube": {
+      "enabled": true
+    },
+    "persistence": {
+      "enabled": true,
+      "profileDir": "/root/.camofox/profiles",
+      "indexedDB": true
+    },
+    "vnc": {
+      "enabled": false,
+      "resolution": "1920x1080"
+    }
+  }
+}

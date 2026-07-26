@@ -71,3 +71,4 @@ services:
       MAX_OLD_SPACE_SIZE: "2048"
     volumes:
       - ./camofox-data:/root/.camofox
+      - ./camofox.config.json:/app/camofox.config.json:ro
