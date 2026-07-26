@@ -18,11 +18,16 @@ services:
     # services regardless — keep PID-1's main program alive with a sleep.
     command: ["sleep", "infinity"]
     ports:
-      - "127.0.0.1:4860:4860"        # web UI — front it with a reverse proxy for TLS
+      - "127.0.0.1:4860:9119"        # dashboard — front it with a reverse proxy for TLS
     env_file:
       - .env
     environment:
       CAMOFOX_URL: http://camofox:9377
+      # Dashboard (kanban, sessions…) is opt-in in the upstream image and
+      # requires an auth provider when bound beyond loopback.
+      HERMES_DASHBOARD: "1"
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${ADMIN_USERNAME:-hermes}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in deploy/.env}
     volumes:
       - ./data:/opt/data
       # Root-equivalent access to the host's Docker — deliberate choice so the
