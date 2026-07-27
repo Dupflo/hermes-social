@@ -31,3 +31,8 @@ node_modules/
 deploy/camofox-data/
 # ── Hermes local agent workspace ─────────────────────────────────────────────
 .hermes/
+
+# Hermes Social
+.hermes/
+deploy/data/tmp/
+deploy/data/tiktok-backoffice/

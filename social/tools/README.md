@@ -1,33 +1,37 @@
-# social/tools
+# Social Tools
 
-Standalone services and scripts that support the social skills — things that
-run *next to* the agent rather than being invoked as a skill.
+Standalone services for social media automation, managed by Hermes Agent.
 
-## meta-webhook/
+| Tool | Directory | Platform | Approach |
+|------|-----------|----------|----------|
+| Meta Webhook | `meta-webhook/` | Facebook, Instagram | Graph API webhooks + OAuth |
+| TikTok Backoffice | `tiktok-backoffice/` | TikTok | Camofox browser automation |
+| YouTube Backoffice | `youtube-backoffice/` | YouTube | Data API + OAuth 2.0 |
 
-Meta comment→DM automation (FastAPI): a user comments a keyword (e.g. `proxy`)
-under an Instagram/Facebook post → the app likes the comment, replies publicly,
-and DMs the resource link. Includes token renewal, campaign rules, backfill
-tooling and tests.
+## Requirements
 
-- Runs as the `meta-webhook` compose service (see `deploy/docker-compose.yml`),
-  bound to `127.0.0.1:8791` — expose it to Meta through your reverse proxy.
-- Config via `META_*` variables in `deploy/.env` (template:
-  `meta-webhook/.env.example`).
-- History note: originally developed in place on the main VPS by the Hermes
-  agent (repo `Dupflo/meta-comment-dm-automation`). This tree is now the home;
-  the old repo is an archive. Runtime state (`data/`, sqlite, logs) stays out
-  of git.
+- Docker (for Camofox browser container)
+- Hermes Agent with cron support
+- Platform-specific API tokens (see each tool's README)
 
-Rules:
+## Architecture
 
-- No secrets in this tree, ever — the repo is public. Config comes from
-  environment variables declared in `deploy/.env.example`.
-- Each tool gets its own directory with a README and, if containerized, its
-  own Dockerfile or compose service entry.
-## tiktok-backoffice/
+Each tool is independent — they share no runtime state. The Hermes Agent
+orchestrates them through crons (for polling) and webhooks (for events).
 
-Draft-only TikTok comment backoffice helpers. The current implementation stores
-comments and suggested replies locally, but never publishes to TikTok. Runtime
-state and TikTok session material stay under `/opt/data`, outside the public
-repo.
+## Security
+
+- **No secrets in source.** Each tool reads `.env` from its own directory
+  (gitignored). YouTube uses OAuth `client_secret.json` (gitignored).
+- **No credentials in logs.** All token values are masked in output.
+- **No public interfaces.** Containers bind to `127.0.0.1`; reach them via
+  SSH tunnel or Hermes proxy.
+
+## Quick start
+
+```bash
+# Each tool has its own dependencies
+cd meta-webhook && uv sync
+cd ../tiktok-backoffice && uv sync
+cd ../youtube-backoffice && # uses system Python, no uv needed
+```

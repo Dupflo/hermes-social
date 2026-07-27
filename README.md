@@ -27,6 +27,35 @@ hermes-social/
 git clone https://github.com/Dupflo/hermes-social
 cd hermes-social/deploy
 cp .env.example .env
+vim .env              # fill in secrets
+docker compose up -d  # starts hermes + camofox + meta-webhook
+```
+
+Then visit the Hermes UI via SSH tunnel:
+
+```bash
+ssh -L 4860:127.0.0.1:4860 root@<vps>
+# Open http://localhost:4860
+```
+
+## Documentation
+
+Consultez le [guide utilisateur](docs/guide/index.md) pour la configuration complète :
+
+| Guide | Description |
+|-------|-------------|
+| [Architecture](docs/guide/architecture.md) | Vue d'ensemble du système |
+| [Meta (Facebook/Instagram)](docs/guide/setup-meta.md) | Création app Facebook, webhook, tokens |
+| [Domaine / DNS](docs/guide/setup-domain.md) | OVH, DNS, HTTPS avec Caddy/Traefik |
+| [TikTok + Camofox](docs/guide/setup-tiktok.md) | Session navigateur, DM automatisé |
+| [YouTube OAuth](docs/guide/setup-youtube.md) | API, réponses publiques |
+
+## Platforms
+
+```bash
+git clone https://github.com/Dupflo/hermes-social
+cd hermes-social/deploy
+cp .env.example .env
 vim .env                    # fill in secrets
 docker compose up -d        # starts hermes + camofox + meta-webhook
 ```
