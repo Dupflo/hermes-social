@@ -1,64 +1,120 @@
 # Hermes Social
 
-[Hermes Agent](https://hermes-agent.nousresearch.com) packaged with a social
-media toolset — one repo, one buildable image, one command to stand up a new
-VPS.
+[Hermes Agent](https://hermes-agent.nousresearch.com) social media automation suite.
+Automate DM replies, public replies, and comment processing across **Meta (Facebook/Instagram)**, **TikTok**, and **YouTube** — all from one Hermes Agent instance.
 
-## Layout
+## Architecture
 
-| Path | What | Touch it? |
-| --- | --- | --- |
-| `core/` | Vendored Hermes Agent source (MIT, Nous Research) | **Never modify** — replaced wholesale on upstream updates |
-| `social/skills/` | Social media skills, loaded via `skills.external_dirs` | Yes — this is where the work happens |
-| `social/tools/` | Standalone services (webhooks, schedulers) | Yes |
-| `social/config/` | Config snippets the social layer needs | Yes |
-| `deploy/` | Compose stack (hermes + camofox), env template, bootstrap | Yes |
-| `Dockerfile` | Overlay: core image + `social/` payload | Rarely |
+```
+hermes-social/
+├── core/              # Vendored Hermes Agent (MIT, Nous Research)
+│                      # Never modify — replaced wholesale on updates
+├── social/
+│   ├── tools/
+│   │   ├── meta-webhook/       # Facebook & Instagram comment automation
+│   │   ├── tiktok-backoffice/  # TikTok DM & review pipeline
+│   │   └── youtube-backoffice/ # YouTube reply automation
+│   ├── skills/       # Social media skills loaded by Hermes
+│   └── config/       # Config snippets
+├── deploy/            # Compose stack, Dockerfile, env template
+├── docs/              # Architecture, security, roadmap
+└── VERSION            # Current release version
+```
 
-## Quick start (fresh VPS)
+## Quick start
 
 ```bash
 git clone https://github.com/Dupflo/hermes-social
 cd hermes-social/deploy
-./bootstrap.sh        # creates .env from template on first run
-vim .env              # fill in secrets
-./bootstrap.sh        # builds images, starts the stack
+cp .env.example .env
+vim .env                    # fill in secrets
+docker compose up -d        # starts hermes + camofox + meta-webhook
 ```
 
-Then merge `social/config/config.social.yaml` into `deploy/data/config.yaml`
-(created on first agent run) and restart.
-
-## Build
+Then visit the Hermes UI via SSH tunnel:
 
 ```bash
-make            # core image + overlay  → hermes-social:latest
-make camofox    # browser image (clones jo-inc/camofox-browser as a sibling)
+ssh -L 4860:127.0.0.1:4860 root@<vps>
+# Open http://localhost:4860
 ```
 
-## Security model
+## Platforms
 
-- **The repo is public — no secrets, ever.** Secrets live only in
-  `deploy/.env` (gitignored, `chmod 600`). Skills read them from the
-  environment.
-- Nothing is published on public interfaces by default: the Hermes UI (4860),
-  noVNC (6080) and VNC (5901) bind to `127.0.0.1`. Reach them over an SSH
-  tunnel (`ssh -L 4860:127.0.0.1:4860 root@<vps>`) or front them with a
-  reverse proxy + auth.
-- The compose file mounts `/var/run/docker.sock` into the agent — deliberate:
-  the agent manages containers on its own VPS. That is root-equivalent on the
-  host; remove the mount on any VPS where that trust isn't wanted.
+### Meta (Facebook / Instagram)
+- Webhook-based: receives comment events in real time
+- Public replies + private DMs via Graph API
+- Keyword matching (proxy, système, markitdown, etc.)
+- Interest-only keywords (migration → manual queue)
+- Supports Instagram private replies
 
-## Updating the vendored core
+### TikTok
+- Browser-based via Camofox (playwright + X11)
+- Video DOM verification before any action
+- Scoped DM history audit to prevent duplicates
+- Automatic DM send with X11 clipboard paste
+- Public fallback detection surveillance
+- Cron: every 15 min
+
+### YouTube
+- YouTube Data API v3 (read) + OAuth 2.0 (write)
+- Keyword matching on recent video comments
+- Public replies with resource link
+- Cron: every 15 min
+
+## Configuration
+
+### Secrets (never committed)
+
+| File | Purpose |
+|------|---------|
+| `deploy/.env` | Main secrets (tokens, keys) |
+| `/opt/data/youtube-backoffice.env` | YouTube API key + refresh token |
+| `/opt/data/tiktok-backoffice/tiktok_backoffice.sqlite3` | Runtime TikTok DB |
+| `social/tools/meta-webhook/.env` | Meta Graph API tokens |
+| `social/tools/youtube-backoffice/client_secret.json` | OAuth client secret |
+
+### Environment Variables
+
+Each tool has its own `.env.example`:
+
+| Tool | Path |
+|------|------|
+| Meta webhook | `social/tools/meta-webhook/.env.example` |
+| TikTok | `social/tools/tiktok-backoffice/.env.example` |
+| YouTube | `social/tools/youtube-backoffice/.env.example` |
+
+## Crons (Hermes-managed)
+
+All run as `no_agent=true` scripts (no LLM token cost):
+
+| Cron | Interval | What it does |
+|------|----------|-------------|
+| TikTok auto-DM | 15 min | Scan, ingest, DM verified users |
+| TikTok fallback surveillance | 30 min | Detect replies/DM on fallback items |
+| YouTube auto-reply | 15 min | Scan comments, post public reply with link |
+| Update checker | Daily | Alert when new version available |
+
+Crons are silent when nothing needs attention — they only notify on Telegram on changes.
+
+## Updating
 
 ```bash
-# Get the new upstream source, then:
-rsync -a --delete --exclude='.git' <new-hermes-source>/ core/
-git add core && git commit -m "core: bump to upstream <version>"
+cd /opt/repos/hermes-social
+git pull
+git checkout tags/$(curl -sL https://api.github.com/repos/Dupflo/hermes-social/releases/latest | python3 -c "import sys,json; print(json.load(sys.stdin)['tag_name'])")
+cd deploy
+docker compose build --no-cache
+docker compose up -d
 ```
 
-Local additions never live in `core/`, so the update is always conflict-free.
-If a core patch ever becomes unavoidable, add it as a `patches/*.diff` applied
-in the Dockerfile — never edit `core/` in place.
+Or use the built-in update checker (cron notifies on new versions).
+
+## Security
+
+- **Zero secrets in repo.** All tokens, keys, and DBs are gitignored.
+- All ports bind to `127.0.0.1` by default — SSH tunnel only.
+- Camofox persistence uses IndexedDB for TikTok session stability.
+- GitHub auth uses VPS-hosted credentials, not repo-stored secrets.
 
 ## License
 
