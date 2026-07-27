@@ -138,7 +138,7 @@ def format_message(report: dict) -> str:
         created += int(ing.get('created_reviews') or 0)
         if not r.get('ok'):
             scan_failures.append(r)
-    if not processed and created == 0 and not scan_failures and before == after and not report.get('errors'):
+    if created == 0 and before == after and not report.get('errors'):
         return ''
     lines = ['TikTok cron auto-DM' if report.get('apply') else 'TikTok cron dry-run']
     lines.append(f"scan: {scan.get('targets', 0)} vidéos, nouveaux review_items={created}, échecs_scan={len(scan_failures)}")
