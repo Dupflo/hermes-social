@@ -324,18 +324,30 @@ class TikTokBackofficeStore:
                     matched_keyword = next((keyword for keyword in campaign["keywords"] if contains_keyword(text, keyword)), None)
                     if matched_keyword is None:
                         continue
+                    # Camofox's panel-text fallback can only expose TikTok display names
+                    # (e.g. "Alexandra Crabé") instead of stable @handles. The DM
+                    # processor needs a real @handle to open the profile; otherwise it
+                    # loops through pending_review and fails with no_target/profile errors.
+                    # Keep the item visible, but route it to manual handle resolution.
+                    review_status = (
+                        ReviewItemStatus.PENDING_REVIEW
+                        if author and str(author).strip().startswith("@")
+                        else "needs_manual_handle"
+                    )
+                    failure_reason = None if review_status == ReviewItemStatus.PENDING_REVIEW else "TikTok scanner captured display name only; exact @handle is required before DM."
                     review_cursor = connection.execute(
                         """
                         INSERT OR IGNORE INTO tiktok_review_items (
-                            comment_id, campaign_slug, matched_keyword, reply_text, status
-                        ) VALUES (?, ?, ?, ?, ?)
+                            comment_id, campaign_slug, matched_keyword, reply_text, status, failure_reason
+                        ) VALUES (?, ?, ?, ?, ?, ?)
                         """,
                         (
                             comment_id,
                             campaign["slug"],
                             matched_keyword,
                             campaign["reply_template"],
-                            ReviewItemStatus.PENDING_REVIEW,
+                            review_status,
+                            failure_reason,
                         ),
                     )
                     created_reviews += review_cursor.rowcount

@@ -403,6 +403,34 @@ _COMMENT_EXTRACTION_JS = r'''
 
 
 
+def _expected_comment_count_from_activation(activation_result: Any) -> int | None:
+    if not isinstance(activation_result, dict):
+        return None
+    candidates = activation_result.get("comment_icon_candidates") or []
+    for candidate in candidates:
+        blob = " ".join(str(candidate.get(key) or "") for key in ("text", "aria"))
+        match = re.search(r"\b(\d+(?:[.,]\d+)?)([KkMm]?)\s+comments?\b", blob) or re.search(r"^\s*(\d+(?:[.,]\d+)?)([KkMm]?)\s*$", blob)
+        if not match:
+            continue
+        value = float(match.group(1).replace(",", "."))
+        suffix = match.group(2).lower()
+        if suffix == "k":
+            value *= 1000
+        elif suffix == "m":
+            value *= 1000000
+        return int(value)
+    return None
+
+
+def _right_panel_looks_like_recommendations(dom_result: dict[str, Any]) -> bool:
+    panel = str(dom_result.get("active_right_panel_preview") or dom_result.get("right_panel_text") or "")
+    if "You may like" not in panel:
+        return False
+    if re.search(r"\b\d+[KkMm]?\s+comments?\b", panel, flags=re.IGNORECASE):
+        return False
+    return bool(re.search(r"#|\b\d+[smhdw]\s+ago\b|\b\d{1,2}-\d{1,2}\b|fyp|foryou", panel, flags=re.IGNORECASE))
+
+
 
 def _video_author_from_url(video_url: str) -> str | None:
     match = re.search(r"tiktok\.com/@([^/?#]+)/video/", video_url)
@@ -432,6 +460,7 @@ def _target_video_coherence(video_url: str, dom_result: dict[str, Any], comments
     lowered = text_blob.lower()
     author_token = (target_author or "").lower().lstrip("@")
     loaded_has_video_id = bool(target_video_id and target_video_id in loaded_url)
+    loaded_is_other_video = bool(target_video_id and "/video/" in loaded_url and not loaded_has_video_id)
     body_has_author = bool(author_token and author_token in lowered)
     comments_have_author = bool(
         author_token
@@ -441,10 +470,15 @@ def _target_video_coherence(video_url: str, dom_result: dict[str, Any], comments
     login_gate = (dom_result.get("logged_in") is False) and bool(re.search(r"\b(Log\s*in|Sign\s*up)\b", str(dom_result.get("body_preview") or ""), re.IGNORECASE))
 
     # Logged-out gates are handled separately: they are not a cross-video hazard,
-    # but they are still non-actionable.
+    # but they are still non-actionable. A different loaded /video/ URL is always
+    # incoherent; TikTok may silently jump to a recommended video while preserving
+    # the target creator in right-rail text, which previously caused false trust.
     coherent = True
     reason = None
-    if target_author and loaded_has_video_id and logged_in and not (body_has_author or comments_have_author):
+    if loaded_is_other_video:
+        coherent = False
+        reason = "loaded_different_video"
+    elif target_author and loaded_has_video_id and logged_in and not (body_has_author or comments_have_author):
         coherent = False
         reason = "target_author_missing_from_loaded_body"
     return {
@@ -486,20 +520,14 @@ def fetch_comments_from_camofox(
             time.sleep(wait_seconds)
         for attempt in range(3):
             activation_errors = []
-            activation_result = None
-            for selector in (':nth-match(:text("Comments"), 1)', ':nth-match(:text("Comments"), 2)', 'text=Comments'):
-                try:
-                    activation_result = client.click(tab_id=tab_id, selector=selector)
-                    activation_result["selector"] = selector
-                    break
-                except Exception as exc:
-                    activation_errors.append(f"{selector}: {exc}")
-                    time.sleep(1.0)
-            if activation_result is None:
-                activation_result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
-                if isinstance(activation_result, dict):
-                    activation_result["fallback"] = "js_click"
-                    activation_result["click_errors"] = activation_errors
+            # Generic text selectors are unsafe on TikTok: they can select the
+            # adjacent/right-rail recommendation tab ("You may like") while still
+            # reporting a successful "Comments" click. Use the DOM-scoped activator
+            # only: comment icon first, then the visible Comments tab in the right panel.
+            activation_result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
+            if isinstance(activation_result, dict):
+                activation_result["fallback"] = "js_click_scoped_comments_panel"
+                activation_result["click_errors"] = activation_errors
             time.sleep(2.0)
             raw_dom_result = client.evaluate(tab_id=tab_id, expression=_COMMENT_EXTRACTION_JS)
             if not isinstance(raw_dom_result, dict):
@@ -518,11 +546,15 @@ def fetch_comments_from_camofox(
         return {"ok": False, "error": "camofox_fetch_failed", "detail": str(exc), "comments": []}
     if dom_result is None:
         return {"ok": False, "error": "unexpected_camofox_result", "comments": []}
+    expected_comment_count = _expected_comment_count_from_activation(activation_result)
+    right_panel_recommendations = _right_panel_looks_like_recommendations(dom_result)
     diagnostics = {
         "activation": activation_result if isinstance(activation_result, dict) else None,
         "comment_nodes": len(dom_result.get("comment_nodes") or []),
         "comments_index": dom_result.get("comments_index"),
         "related_tab_active": dom_result.get("related_tab_active"),
+        "expected_comment_count": expected_comment_count,
+        "right_panel_recommendations": right_panel_recommendations,
         "title": dom_result.get("title"),
         "url": dom_result.get("url"),
         "target_video_coherence": coherence,
@@ -532,6 +564,61 @@ def fetch_comments_from_camofox(
             "ok": False,
             "error": "target_video_incoherent",
             "detail": coherence.get("reason"),
+            "video_url": video_url,
+            "logged_in": bool(dom_result.get("logged_in")),
+            "captcha": bool(dom_result.get("captcha")),
+            "comments": [],
+            "diagnostics": diagnostics,
+        }
+    if bool(dom_result.get("captcha")):
+        return {
+            "ok": False,
+            "error": "captcha_required",
+            "detail": "TikTok verification/captcha is visible",
+            "video_url": video_url,
+            "logged_in": bool(dom_result.get("logged_in")),
+            "captcha": True,
+            "comments": [],
+            "diagnostics": diagnostics,
+        }
+    if dom_result.get("logged_in") is False and not comments:
+        return {
+            "ok": False,
+            "error": "tiktok_page_not_actionable",
+            "detail": "TikTok did not expose a logged-in/comment-readable page",
+            "video_url": video_url,
+            "logged_in": False,
+            "captcha": bool(dom_result.get("captcha")),
+            "comments": [],
+            "diagnostics": diagnostics,
+        }
+    if dom_result.get("related_tab_active") and not comments:
+        return {
+            "ok": False,
+            "error": "comments_tab_not_active",
+            "detail": "TikTok related/recommendation tab is active instead of Comments",
+            "video_url": video_url,
+            "logged_in": bool(dom_result.get("logged_in")),
+            "captcha": bool(dom_result.get("captcha")),
+            "comments": [],
+            "diagnostics": diagnostics,
+        }
+    if right_panel_recommendations and not comments:
+        return {
+            "ok": False,
+            "error": "right_panel_recommendations",
+            "detail": "TikTok right panel shows recommendations instead of comment rows",
+            "video_url": video_url,
+            "logged_in": bool(dom_result.get("logged_in")),
+            "captcha": bool(dom_result.get("captcha")),
+            "comments": [],
+            "diagnostics": diagnostics,
+        }
+    if expected_comment_count and expected_comment_count > 0 and not comments:
+        return {
+            "ok": False,
+            "error": "comments_expected_but_not_extracted",
+            "detail": f"TikTok reports {expected_comment_count} comments but DOM/API extraction returned zero",
             "video_url": video_url,
             "logged_in": bool(dom_result.get("logged_in")),
             "captcha": bool(dom_result.get("captcha")),

@@ -91,3 +91,24 @@ def test_ingest_comments_ignores_unapproved_video_campaign(tmp_path):
 
     assert result == {"ok": True, "ingested": 1, "created_reviews": 0}
     assert json.loads(run(["--db", str(db), "next-review"]))["item"] is None
+
+
+def test_ingest_comments_routes_display_name_only_to_manual_handle(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    _setup_video_campaign(db)
+    comments = tmp_path / "comments.json"
+    comments.write_text(json.dumps([{"id": "display-only", "author": "Alexandra Crabé", "text": "proxy"}]))
+
+    result = json.loads(run(["--db", str(db), "ingest-comments", "--video-url", "https://www.tiktok.com/@dupflodev/video/123", "--json-file", str(comments)]))
+
+    assert result == {"ok": True, "ingested": 1, "created_reviews": 1}
+    items = json.loads(run(["--db", str(db), "list"]))["items"]
+    assert items[0]["author"] == "Alexandra Crabé"
+    assert json.loads(run(["--db", str(db), "next-review"]))["item"] is None
+
+    import sqlite3
+    con = sqlite3.connect(db)
+    con.row_factory = sqlite3.Row
+    row = con.execute("SELECT status, failure_reason FROM tiktok_review_items WHERE comment_id='display-only'").fetchone()
+    assert row["status"] == "needs_manual_handle"
+    assert "exact @handle" in row["failure_reason"]

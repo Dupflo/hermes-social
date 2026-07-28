@@ -270,3 +270,32 @@ def test_target_video_coherence_accepts_target_author_from_extracted_comments():
 
     assert coherence["coherent"] is True
     assert coherence["comments_have_author"] is True
+
+
+def test_target_video_coherence_rejects_silent_jump_to_recommended_video():
+    from app.camofox_reader import _target_video_coherence
+
+    result = _target_video_coherence(
+        "https://www.tiktok.com/@dupflodev/video/7667537436582464801",
+        {
+            "url": "https://www.tiktok.com/@niko_bellic_gta_4/video/7650502123054042401",
+            "title": "Niko Nailed the Landing | TikTok",
+            "logged_in": True,
+            "body_preview": "Comments You may like dupflodev 3d ago",
+            "active_right_panel_preview": "Comments You may like dupflodev 3d ago",
+        },
+        [],
+    )
+
+    assert result["coherent"] is False
+    assert result["reason"] == "loaded_different_video"
+
+
+def test_comment_count_guard_detects_expected_comments_without_rows():
+    from app.camofox_reader import _expected_comment_count_from_activation, _right_panel_looks_like_recommendations
+
+    activation = {"comment_icon_candidates": [{"text": "2", "aria": "Read or add comments\n2 comments"}]}
+    dom = {"active_right_panel_preview": "Comments You may like funny #fyp user 1d ago"}
+
+    assert _expected_comment_count_from_activation(activation) == 2
+    assert _right_panel_looks_like_recommendations(dom) is True
