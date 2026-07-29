@@ -47,6 +47,7 @@ def pending_items(limit: int) -> list[dict]:
         JOIN tiktok_comments c ON c.comment_id = ri.comment_id
         WHERE ri.status = 'pending_review'
           AND ri.campaign_slug != 'guide'
+          AND c.author LIKE '@%'
         ORDER BY ri.created_at ASC, ri.id ASC
         LIMIT ?
         ''',
