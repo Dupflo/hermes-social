@@ -8,6 +8,7 @@ from app.graph_client import GraphAPIError
 from app.keyword import contains_keyword
 from app.outbound_message_store import OutboundMessageStore
 from app.platform_utils import facebook_graph_comment_id
+from app.platform_utils import is_owner_comment_event
 from app.store import ProcessedCommentStore
 from app.webhook_parser import CommentEvent
 
@@ -71,6 +72,8 @@ class CommentProcessor:
         keyword: str = "proxy",
         resource_url: str = "",
         public_reply_text: str = "C'est envoyé, check tes DM",
+        owner_ids: set[str] | None = None,
+        owner_usernames: set[str] | None = None,
     ) -> None:
         self.graph_client = graph_client
         self.store = store
@@ -80,6 +83,8 @@ class CommentProcessor:
         self.keyword = keyword
         self.resource_url = resource_url
         self.public_reply_text = public_reply_text
+        self.owner_ids = owner_ids or set()
+        self.owner_usernames = owner_usernames or set()
 
     async def process_events(self, events: list[CommentEvent]) -> list[ProcessingResult]:
         results = []
@@ -88,6 +93,10 @@ class CommentProcessor:
         return results
 
     async def _process_event(self, event: CommentEvent) -> ProcessingResult:
+        if is_owner_comment_event(event, self.owner_ids, self.owner_usernames):
+            logger.info("Skipping owner comment event comment_id=%s platform=%s", event.comment_id, event.platform)
+            return ProcessingResult(comment_id=event.comment_id, status="ignored_owner")
+
         rule = self.rule_store.find_matching_rule(event) if self.rule_store else None
         if rule is None:
             if self.rule_store and self.rule_store.has_enabled_rules():

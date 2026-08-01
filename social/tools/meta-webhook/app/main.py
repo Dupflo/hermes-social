@@ -222,6 +222,8 @@ def create_app() -> FastAPI:
                 keyword=settings.resource_keyword,
                 resource_url=settings.resource_url,
                 public_reply_text=settings.public_reply_text,
+                owner_ids=owner_ids,
+                owner_usernames=owner_usernames,
             )
             results = await processor.process_events(events)
 

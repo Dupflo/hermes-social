@@ -123,6 +123,8 @@ class MetaCommentFetcher:
                 text = comment.get("message")
                 if not comment_id or text is None:
                     continue
+                if self._is_owner_reply(comment):
+                    continue
                 author = comment.get("from") or {}
                 comments.append(
                     BackfillCandidate(

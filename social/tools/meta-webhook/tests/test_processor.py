@@ -113,7 +113,7 @@ async def test_processor_likes_matching_facebook_comment(tmp_path):
     assert graph.calls == [
         ("like", "comment-1"),
         ("facebook_can_reply_privately", "comment-1"),
-        ("facebook_public_reply", "comment-1", "C'est envoyé, check tes DM"),
+        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
         ("facebook_private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
     ]
 
@@ -138,7 +138,7 @@ async def test_processor_uses_short_graph_comment_id_for_facebook_actions(tmp_pa
     assert graph.calls == [
         ("like", "comment-1"),
         ("facebook_can_reply_privately", "post-1_comment-1"),
-        ("facebook_public_reply", "comment-1", "C'est envoyé, check tes DM"),
+        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
         ("facebook_private_reply", "page-1", "post-1_comment-1", "Voici la ressource demandée : https://example.com/proxy"),
     ]
     assert store.was_processed("facebook", "post-1_comment-1") is True
@@ -164,7 +164,7 @@ async def test_processor_continues_facebook_flow_when_like_fails(tmp_path):
     assert graph.calls == [
         ("like", "comment-1"),
         ("facebook_can_reply_privately", "comment-1"),
-        ("facebook_public_reply", "comment-1", "C'est envoyé, check tes DM"),
+        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
         ("facebook_private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
     ]
 
@@ -188,7 +188,7 @@ async def test_processor_uses_default_public_reply_when_config_is_blank(tmp_path
     assert result == [ProcessingResult(comment_id="comment-1", status="processed")]
     assert graph.calls == [
         ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
-        ("public_reply", "comment-1", "C'est envoyé, check tes DM"),
+        ("public_reply", "comment-1", "C'est envoyé ! Check tes messages privés !"),
     ]
 
 
@@ -217,6 +217,35 @@ async def test_processor_ignores_non_matching_keyword(tmp_path):
 
     assert result == [ProcessingResult(comment_id="comment-1", status="ignored")]
     assert graph.calls == []
+
+
+@pytest.mark.asyncio
+async def test_processor_ignores_owner_comment_events(tmp_path):
+    store = ProcessedCommentStore(tmp_path / "processed.sqlite3")
+    graph = FakeGraphClient()
+    processor = CommentProcessor(
+        graph_client=graph,
+        store=store,
+        page_id="page-1",
+        keyword="graphify",
+        resource_url="https://example.com/graphify",
+        public_reply_text="C'est envoyé, check tes DM",
+        owner_ids={"page-1"},
+        owner_usernames={"FloDev - Développement Web et Tutoriels vidéo"},
+    )
+    event = CommentEvent(
+        platform="facebook",
+        comment_id="post-1_owner-comment",
+        text="Graphify should not trigger on our own reply",
+        author_id="page-1",
+        username="FloDev - Développement Web et Tutoriels vidéo",
+    )
+
+    result = await processor.process_events([event])
+
+    assert result == [ProcessingResult(comment_id="post-1_owner-comment", status="ignored_owner")]
+    assert graph.calls == []
+    assert store.delivery_state("facebook", "post-1_owner-comment") is None
 
 
 @pytest.mark.asyncio
@@ -322,7 +351,7 @@ async def test_processor_retries_missing_public_reply_without_duplicate_dm(tmp_p
     assert result == [ProcessingResult(comment_id="post-1_comment-1", status="processed")]
     assert graph.calls == [
         ("like", "comment-1"),
-        ("facebook_public_reply", "comment-1", "C'est envoyé, check tes DM"),
+        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
     ]
     assert store.delivery_state("facebook", "post-1_comment-1") == {
         "status": "processed",
@@ -422,7 +451,7 @@ async def test_processor_records_outbound_public_reply_and_private_reply(tmp_pat
     rows = outbound_store.list_for_source("facebook", "post-1_comment-1")
     assert [row["message_type"] for row in rows] == ["public_reply", "private_reply"]
     assert [row["message_text"] for row in rows] == [
-        "C'est envoyé, check tes DM",
+        "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger.",
         "Voici la ressource demandée : https://example.com/proxy",
     ]
     assert [row["meta_response_id"] for row in rows] == ["reply-id", "message-id"]
