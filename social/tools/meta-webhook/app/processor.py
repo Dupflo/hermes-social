@@ -38,6 +38,19 @@ FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT = (
     "Meta ne me laisse pas t’écrire en premier 😅\n"
     "Envoie-moi un petit message et je t’envoie le lien."
 )
+FACEBOOK_DM_INVITATION_CONFIRMATION_TEXT = (
+    "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."
+)
+DEFAULT_DM_CONFIRMATION_TEXT = "C'est envoyé ! Check tes messages privés !"
+
+
+def public_reply_for_platform(platform: str, base_text: str) -> str:
+    text = (base_text or DEFAULT_DM_CONFIRMATION_TEXT).strip() or DEFAULT_DM_CONFIRMATION_TEXT
+    if platform == "facebook" and text.lower().startswith("c'est envoyé"):
+        return FACEBOOK_DM_INVITATION_CONFIRMATION_TEXT
+    if platform == "instagram" and "Messenger" in text:
+        return DEFAULT_DM_CONFIRMATION_TEXT
+    return text
 
 
 @dataclass(frozen=True)
@@ -99,7 +112,7 @@ class CommentProcessor:
             )
 
         keyword = rule.keywords[0]
-        public_reply_text = rule.public_reply_text.strip() or "C'est envoyé, check tes DM"
+        public_reply_text = public_reply_for_platform(event.platform, rule.public_reply_text)
         dm_text = rule.dm_text.strip()
         if not dm_text:
             return ProcessingResult(comment_id=event.comment_id, status="ignored")
