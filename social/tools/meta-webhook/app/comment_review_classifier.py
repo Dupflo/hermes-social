@@ -26,6 +26,10 @@ REQUEST_RE = re.compile(
     r"\b(lien|link|ressource|resource|outil|tool|nom|site|guide|comment faire|tu peux|peux[- ]?tu|stp|svp|int[eé]ress[ée]?|dm|mp|envoie|envoi)\b",
     re.IGNORECASE,
 )
+CONVERSATIONAL_RE = re.compile(
+    r"\b(on peut|peut[- ]?on|pourrais[- ]?tu|peux[- ]?tu|tu penses|t['’]?en penses|avis|question|pourquoi|comment|int[eé]gr[ée]r?|installer|utiliser|migration|codex|claude code|antigravity|cursor|mcp|repo|github|limite|token|tokens)\b",
+    re.IGNORECASE,
+)
 NOISE = {
     "merci",
     "merci beaucoup",
@@ -77,7 +81,28 @@ def classify_comment_for_review(
     if _looks_like_short_keyword(text, normalized):
         return CommentReviewDecision(True, "possible_unconfigured_keyword", 40)
 
+    if CONVERSATIONAL_RE.search(text):
+        return CommentReviewDecision(True, "basic_reply", 55)
+
+    if _looks_like_non_trivial_comment(text, normalized):
+        return CommentReviewDecision(True, "basic_reply", 50)
+
     return CommentReviewDecision(False, "noise", 0)
+
+
+def _looks_like_non_trivial_comment(text: str, normalized: str) -> bool:
+    cleaned = normalized.strip(" #!?.:,;🙏🙂😀😅🔥👏❤️👍")
+    if not cleaned or cleaned in NOISE:
+        return False
+    words = re.findall(r"[\w'’.-]+", text, re.UNICODE)
+    # Keep human comments that are long enough to deserve a possible reply, but avoid pure tag spam.
+    if len(words) < 4:
+        return False
+    if sum(1 for word in words if word.startswith("@")) >= max(2, len(words) // 2):
+        return False
+    if len(" ".join(words)) < 18:
+        return False
+    return True
 
 
 def _looks_like_short_keyword(text: str, normalized: str) -> bool:

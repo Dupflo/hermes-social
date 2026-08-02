@@ -40,6 +40,35 @@ def test_classifier_keeps_business_intent():
     assert decision.score == 90
 
 
+def test_classifier_keeps_basic_replies_for_manual_review():
+    question = classify_comment_for_review(
+        text="On peut intégrer Codex à Claude Code ?",
+        has_owner_reply=False,
+        matches_active_campaign=False,
+        already_terminal=False,
+    )
+    opinion = classify_comment_for_review(
+        text="J’aimerais bien avoir ton avis sur Antigravity",
+        has_owner_reply=False,
+        matches_active_campaign=False,
+        already_terminal=False,
+    )
+    long_basic = classify_comment_for_review(
+        text="Les limites de Claude Code sur les tokens c’est vraiment le sujet important pour moi",
+        has_owner_reply=False,
+        matches_active_campaign=False,
+        already_terminal=False,
+    )
+
+    assert question.should_store is True
+    assert question.reason == "basic_reply"
+    assert question.score == 55
+    assert opinion.should_store is True
+    assert opinion.reason == "basic_reply"
+    assert long_basic.should_store is True
+    assert long_basic.reason == "basic_reply"
+
+
 def test_classifier_keeps_short_unknown_keyword_but_ignores_noise():
     keyword = classify_comment_for_review(
         text="Repo",
