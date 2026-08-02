@@ -349,7 +349,7 @@ construit par empreinte SHA-256 :
 
 ```python
 def _comment_fingerprint(*, video_url, author, text, created_time=None):
-    material = "\␟".join([
+    material = "\u241f".join([
         video_url, author or "", text,
         "" if created_time is None else str(created_time)
     ])
