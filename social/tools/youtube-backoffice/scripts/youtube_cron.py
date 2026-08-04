@@ -24,6 +24,7 @@ CAMPAIGN_URLS = {
     "gstack": "https://dupflodev.vercel.app/1jour1skill?ep=ep7",
     "voicebox": "https://dupflodev.vercel.app/1jour1skill?ep=ep10",
     "graphify": "https://dupflodev.vercel.app/1jour1skill?ep=ep11",
+    "obsidian": "https://dupflodev.vercel.app/1jour1skill?ep=ep12",
 }
 # Backward compatibility: RESOURCE_URL overrides Proxy only if explicitly set.
 if env_val("RESOURCE_URL"):
@@ -35,6 +36,7 @@ KEYWORDS = {
     "gstack":"gstack","gstak":"gstack",
     "voicebox":"voicebox",
     "graphify":"graphify","graphity":"graphify","graphiphy":"graphify","graphily":"graphify",
+    "obsidian":"obsidian",
 }
 
 def fetch(path, params=None):
