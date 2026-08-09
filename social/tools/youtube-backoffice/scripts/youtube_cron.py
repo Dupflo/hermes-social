@@ -25,6 +25,7 @@ CAMPAIGN_URLS = {
     "voicebox": "https://dupflodev.vercel.app/1jour1skill?ep=ep10",
     "graphify": "https://dupflodev.vercel.app/1jour1skill?ep=ep11",
     "obsidian": "https://dupflodev.vercel.app/1jour1skill?ep=ep12",
+    "competence": "https://support.claude.com/fr/articles/12512180-utiliser-les-competences-dans-claude",
 }
 # Backward compatibility: RESOURCE_URL overrides Proxy only if explicitly set.
 if env_val("RESOURCE_URL"):
@@ -37,6 +38,7 @@ KEYWORDS = {
     "voicebox":"voicebox",
     "graphify":"graphify","graphity":"graphify","graphiphy":"graphify","graphily":"graphify",
     "obsidian":"obsidian",
+    "competence":"competence","compétence":"competence","competences":"competence","compétences":"competence",
 }
 
 def fetch(path, params=None):
