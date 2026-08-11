@@ -27,6 +27,10 @@ CAMPAIGN_URLS = {
     "obsidian": "https://dupflodev.vercel.app/1jour1skill?ep=ep12",
     "competence": "https://support.claude.com/fr/articles/12512180-utiliser-les-competences-dans-claude",
 }
+VIDEO_CAMPAIGN_URLS = {
+    # Same keyword as Claude competence video, different resource.
+    "5Rvl_05NPSU": "https://help.openai.com/en/articles/20001066-skills-in-chatgpt",
+}
 # Backward compatibility: RESOURCE_URL overrides Proxy only if explicitly set.
 if env_val("RESOURCE_URL"):
     CAMPAIGN_URLS["proxy"] = env_val("RESOURCE_URL")
@@ -98,7 +102,7 @@ def run_scan():
                 con.execute("INSERT OR IGNORE INTO processed_comments (platform, comment_id, keyword, status) VALUES ('youtube', ?, ?, 'ignored')", (cid, matched))
                 con.commit()
                 continue
-            reply_text = f"{PUBLIC_REPLY} {CAMPAIGN_URLS.get(matched, CAMPAIGN_URLS['proxy'])}"
+            reply_text = f"{PUBLIC_REPLY} {VIDEO_CAMPAIGN_URLS.get(vid, CAMPAIGN_URLS.get(matched, CAMPAIGN_URLS['proxy']))}"
             try:
                 resp = reply_to_comment(cid, reply_text)
                 reply_id = resp.get("id", "?")
