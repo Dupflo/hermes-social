@@ -26,10 +26,13 @@ CAMPAIGN_URLS = {
     "graphify": "https://dupflodev.vercel.app/1jour1skill?ep=ep11",
     "obsidian": "https://dupflodev.vercel.app/1jour1skill?ep=ep12",
     "competence": "https://support.claude.com/fr/articles/12512180-utiliser-les-competences-dans-claude",
+    "token_bundle": "Caveman : https://dupflodev.vercel.app/1jour1skill?ep=ep4\nMarkitdown : https://dupflodev.vercel.app/1jour1skill?ep=ep6\nGraphify : https://dupflodev.vercel.app/1jour1skill?ep=ep11",
 }
 VIDEO_CAMPAIGN_URLS = {
     # Same keyword as Claude competence video, different resource.
     "5Rvl_05NPSU": "https://help.openai.com/en/articles/20001066-skills-in-chatgpt",
+    # Token-saving bundle: Caveman + Markitdown + Graphify.
+    "xwxks3Kta8Q": CAMPAIGN_URLS["token_bundle"],
 }
 # Backward compatibility: RESOURCE_URL overrides Proxy only if explicitly set.
 if env_val("RESOURCE_URL"):
@@ -43,6 +46,7 @@ KEYWORDS = {
     "graphify":"graphify","graphity":"graphify","graphiphy":"graphify","graphily":"graphify",
     "obsidian":"obsidian",
     "competence":"competence","compétence":"competence","competences":"competence","compétences":"competence",
+    "token":"token_bundle","tokens":"token_bundle","skill":"token_bundle","skills":"token_bundle",
 }
 
 def fetch(path, params=None):
