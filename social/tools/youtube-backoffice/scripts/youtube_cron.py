@@ -26,7 +26,7 @@ CAMPAIGN_URLS = {
     "graphify": "https://dupflodev.vercel.app/1jour1skill?ep=ep11",
     "obsidian": "https://dupflodev.vercel.app/1jour1skill?ep=ep12",
     "competence": "https://support.claude.com/fr/articles/12512180-utiliser-les-competences-dans-claude",
-    "token_bundle": "Caveman : https://dupflodev.vercel.app/1jour1skill?ep=ep4\nMarkitdown : https://dupflodev.vercel.app/1jour1skill?ep=ep6\nGraphify : https://dupflodev.vercel.app/1jour1skill?ep=ep11",
+    "token_bundle": "Graphify : https://www.youtube.com/watch?v=ZGy7QvLAuXU\nGraphify partie 2 : https://www.youtube.com/watch?v=37mLIY9mW5A",
 }
 VIDEO_CAMPAIGN_URLS = {
     # Same keyword as Claude competence video, different resource.
