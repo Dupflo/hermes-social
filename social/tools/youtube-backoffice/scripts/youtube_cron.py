@@ -27,12 +27,15 @@ CAMPAIGN_URLS = {
     "obsidian": "https://dupflodev.vercel.app/1jour1skill?ep=ep12",
     "competence": "https://support.claude.com/fr/articles/12512180-utiliser-les-competences-dans-claude",
     "token_bundle": "Graphify : https://www.youtube.com/watch?v=ZGy7QvLAuXU\nGraphify partie 2 : https://www.youtube.com/watch?v=37mLIY9mW5A",
+    "context_bundle": "Graphify : https://www.youtube.com/watch?v=ZGy7QvLAuXU\nGraphify partie 2 : https://www.youtube.com/watch?v=37mLIY9mW5A",
 }
 VIDEO_CAMPAIGN_URLS = {
     # Same keyword as Claude competence video, different resource.
     "5Rvl_05NPSU": "https://help.openai.com/en/articles/20001066-skills-in-chatgpt",
     # Token-saving bundle: Caveman + Markitdown + Graphify.
     "xwxks3Kta8Q": CAMPAIGN_URLS["token_bundle"],
+    # Context-window bundle: associated videos on YouTube.
+    "ay3CgJMwBTw": CAMPAIGN_URLS["context_bundle"],
 }
 # Backward compatibility: RESOURCE_URL overrides Proxy only if explicitly set.
 if env_val("RESOURCE_URL"):
@@ -47,6 +50,7 @@ KEYWORDS = {
     "obsidian":"obsidian",
     "competence":"competence","compétence":"competence","competences":"competence","compétences":"competence",
     "token":"token_bundle","tokens":"token_bundle","skill":"token_bundle","skills":"token_bundle",
+    "contexte":"context_bundle","context":"context_bundle","contextes":"context_bundle","contexts":"context_bundle","ctx":"context_bundle",
 }
 
 def fetch(path, params=None):
