@@ -17,6 +17,15 @@ API_KEY = env_val("YOUTUBE_API_KEY")
 CHANNEL_ID = env_val("YOUTUBE_CHANNEL_ID")
 PUBLIC_REPLY = env_val("PUBLIC_REPLY_TEXT") or "Voici le lien :"
 INTEREST_ONLY = {k.strip() for k in env_val("INTEREST_ONLY_KEYWORDS").split(",") if k.strip()}
+PUBLIC_ONLY_REPLIES = {
+    "mcp_public_interest": [
+        "Merci pour le signal 🙌 Je note l’intérêt pour une vraie démo MCP.",
+        "Trop bien, je prends ça comme un vote pour une vidéo démo MCP 👀",
+        "Yes, je vois que le sujet MCP intéresse — je vais préparer une démo concrète.",
+        "C’est noté pour MCP 🙏 L’idée serait de montrer un MCP développé de zéro.",
+        "Merci ! Ça me confirme que le sujet MCP mérite une vidéo dédiée.",
+    ],
+}
 CAMPAIGN_URLS = {
     "proxy": "https://dupflodev.vercel.app/1jour1skill?ep=ep9",
     "markitdown": "https://dupflodev.vercel.app/1jour1skill?ep=ep6",
@@ -51,6 +60,7 @@ KEYWORDS = {
     "competence":"competence","compétence":"competence","competences":"competence","compétences":"competence",
     "token":"token_bundle","tokens":"token_bundle","skill":"token_bundle","skills":"token_bundle",
     "contexte":"context_bundle","context":"context_bundle","contextes":"context_bundle","contexts":"context_bundle","ctx":"context_bundle",
+    "mcp":"mcp_public_interest",
 }
 
 def fetch(path, params=None):
@@ -110,11 +120,17 @@ def run_scan():
                 con.execute("INSERT OR IGNORE INTO processed_comments (platform, comment_id, keyword, status) VALUES ('youtube', ?, ?, 'ignored')", (cid, matched))
                 con.commit()
                 continue
-            reply_text = f"{PUBLIC_REPLY} {VIDEO_CAMPAIGN_URLS.get(vid, CAMPAIGN_URLS.get(matched, CAMPAIGN_URLS['proxy']))}"
+            public_only_replies = PUBLIC_ONLY_REPLIES.get(matched)
+            if public_only_replies:
+                reply_text = public_only_replies[sum(ord(ch) for ch in cid) % len(public_only_replies)]
+                status = "public_reply_only"
+            else:
+                reply_text = f"{PUBLIC_REPLY} {VIDEO_CAMPAIGN_URLS.get(vid, CAMPAIGN_URLS.get(matched, CAMPAIGN_URLS['proxy']))}"
+                status = "processed"
             try:
                 resp = reply_to_comment(cid, reply_text)
                 reply_id = resp.get("id", "?")
-                con.execute("INSERT OR REPLACE INTO processed_comments (platform, comment_id, keyword, status, public_reply_sent, dm_sent, processed_at) VALUES ('youtube', ?, ?, 'processed', 1, 0, CURRENT_TIMESTAMP)", (cid, matched))
+                con.execute("INSERT OR REPLACE INTO processed_comments (platform, comment_id, keyword, status, public_reply_sent, dm_sent, processed_at) VALUES ('youtube', ?, ?, ?, 1, 0, CURRENT_TIMESTAMP)", (cid, matched, status))
                 con.commit()
                 print(f"✅ @{author} ({cid}) → replied id={reply_id}")
                 replied += 1
