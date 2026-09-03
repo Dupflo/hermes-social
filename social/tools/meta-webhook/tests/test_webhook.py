@@ -326,3 +326,39 @@ def test_keyword_match_is_case_insensitive_and_word_based():
     assert contains_keyword("proxyman", "proxy") is False
     assert contains_keyword("sans proxy", "proxy") is False
     assert contains_keyword("pas de proxy", "proxy") is False
+
+
+import pytest
+from app.main import _hydrate_missing_instagram_media
+from app.webhook_parser import CommentEvent
+
+
+@pytest.mark.asyncio
+async def test_hydrate_missing_instagram_media_resolves_media_id():
+    class FakeGraphClient:
+        async def get_instagram_comment_media(self, comment_id):
+            assert comment_id == "ig-comment-without-media"
+            return {"media": {"id": "ig-media-resolved"}}
+
+    events = [
+        CommentEvent(
+            platform="instagram",
+            comment_id="ig-comment-without-media",
+            text="Outils",
+            media_id=None,
+            author_id="user-1",
+            username="alice",
+        ),
+        CommentEvent(
+            platform="facebook",
+            comment_id="fb-comment",
+            text="Outils",
+            media_id="post-1",
+        ),
+    ]
+
+    hydrated = await _hydrate_missing_instagram_media(events, FakeGraphClient())
+
+    assert hydrated[0].media_id == "ig-media-resolved"
+    assert hydrated[0].comment_id == "ig-comment-without-media"
+    assert hydrated[1] == events[1]

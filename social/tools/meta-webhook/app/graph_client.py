@@ -47,6 +47,9 @@ class GraphClient:
             },
         )
 
+    async def get_instagram_comment_media(self, comment_id: str) -> dict[str, Any]:
+        return await self._get(f"/{comment_id}", params={"fields": "media{id,permalink,caption}"})
+
     async def _private_reply_to_comment(self, page_id: str, comment_id: str, text: str) -> dict[str, Any]:
         return await self._post(
             f"/{page_id}/messages",

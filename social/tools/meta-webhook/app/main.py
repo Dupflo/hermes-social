@@ -1,4 +1,5 @@
 import logging
+from dataclasses import replace
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -176,48 +177,54 @@ def create_app() -> FastAPI:
         private_message_events = parse_private_message_events(payload)
         owner_ids, owner_usernames = owner_identity_sets(settings)
         review_store = CommentReviewStore(settings.processed_comments_database)
-        manual_replies = reconcile_manual_review_replies(
-            events=events,
-            review_store=review_store,
-            owner_ids=owner_ids,
-            owner_usernames=owner_usernames,
-        )
-        manual_queue_summary = enqueue_interesting_webhook_comments(
-            events=events,
-            review_store=review_store,
-            rule_store=CampaignRuleStore(settings.processed_comments_database),
-            processed_store=ProcessedCommentStore(settings.processed_comments_database),
-            owner_ids=owner_ids,
-            owner_usernames=owner_usernames,
-            interest_only_keywords=_csv_set(settings.interest_only_keywords),
-        )
-        private_messages_enqueued = enqueue_private_message_events(
-            events=private_message_events,
-            review_store=review_store,
-            owner_ids=owner_ids,
-        )
-        logger.info(
-            "received Meta webhook object=%s entries=%s fields=%s parsed_events=%s private_messages=%s manual_review_replies=%s manual_review_enqueued=%s private_messages_enqueued=%s",
-            payload.get("object"),
-            len(payload.get("entry", [])),
-            _webhook_fields(payload),
-            len(events),
-            len(private_message_events),
-            manual_replies,
-            manual_queue_summary.inserted_pending,
-            private_messages_enqueued,
-        )
+        rule_store = CampaignRuleStore(settings.processed_comments_database)
+        processed_store = ProcessedCommentStore(settings.processed_comments_database)
 
         async with httpx.AsyncClient(timeout=20) as http_client:
+            graph_client = GraphClient(
+                access_token=settings.meta_page_access_token,
+                http_client=http_client,
+                api_version=settings.graph_api_version,
+            )
+            events = await _hydrate_missing_instagram_media(events, graph_client)
+
+            manual_replies = reconcile_manual_review_replies(
+                events=events,
+                review_store=review_store,
+                owner_ids=owner_ids,
+                owner_usernames=owner_usernames,
+            )
+            manual_queue_summary = enqueue_interesting_webhook_comments(
+                events=events,
+                review_store=review_store,
+                rule_store=rule_store,
+                processed_store=processed_store,
+                owner_ids=owner_ids,
+                owner_usernames=owner_usernames,
+                interest_only_keywords=_csv_set(settings.interest_only_keywords),
+            )
+            private_messages_enqueued = enqueue_private_message_events(
+                events=private_message_events,
+                review_store=review_store,
+                owner_ids=owner_ids,
+            )
+            logger.info(
+                "received Meta webhook object=%s entries=%s fields=%s parsed_events=%s private_messages=%s manual_review_replies=%s manual_review_enqueued=%s private_messages_enqueued=%s",
+                payload.get("object"),
+                len(payload.get("entry", [])),
+                _webhook_fields(payload),
+                len(events),
+                len(private_message_events),
+                manual_replies,
+                manual_queue_summary.inserted_pending,
+                private_messages_enqueued,
+            )
+
             processor = CommentProcessor(
-                graph_client=GraphClient(
-                    access_token=settings.meta_page_access_token,
-                    http_client=http_client,
-                    api_version=settings.graph_api_version,
-                ),
-                store=ProcessedCommentStore(settings.processed_comments_database),
+                graph_client=graph_client,
+                store=processed_store,
                 outbound_store=OutboundMessageStore(settings.processed_comments_database),
-                rule_store=CampaignRuleStore(settings.processed_comments_database),
+                rule_store=rule_store,
                 page_id=settings.meta_page_id,
                 keyword=settings.resource_keyword,
                 resource_url=settings.resource_url,
@@ -244,6 +251,27 @@ def create_app() -> FastAPI:
         }
 
     return app
+
+
+async def _hydrate_missing_instagram_media(events, graph_client: GraphClient):
+    hydrated = []
+    for event in events:
+        if event.platform != "instagram" or event.media_id:
+            hydrated.append(event)
+            continue
+        try:
+            data = await graph_client.get_instagram_comment_media(event.comment_id)
+        except Exception:
+            logger.exception("Failed to resolve Instagram media for comment_id=%s", event.comment_id)
+            hydrated.append(event)
+            continue
+        media = data.get("media") if isinstance(data, dict) else None
+        media_id = media.get("id") if isinstance(media, dict) else None
+        if media_id:
+            hydrated.append(replace(event, media_id=media_id))
+        else:
+            hydrated.append(event)
+    return hydrated
 
 
 def _webhook_fields(payload: dict) -> list[str]:
