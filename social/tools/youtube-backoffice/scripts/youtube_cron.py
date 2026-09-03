@@ -17,6 +17,9 @@ API_KEY = env_val("YOUTUBE_API_KEY")
 CHANNEL_ID = env_val("YOUTUBE_CHANNEL_ID")
 PUBLIC_REPLY = env_val("PUBLIC_REPLY_TEXT") or "Voici le lien :"
 INTEREST_ONLY = {k.strip() for k in env_val("INTEREST_ONLY_KEYWORDS").split(",") if k.strip()}
+AINNOTATIONS_REPLY = 'Hey ! Voici le lien vers ainnotations :\n\nhttps://github.com/Dupflo/ainnotations\n\nC’est un outil que j’ai moi-même conçu. Je suis vraiment preneur de retours, et si ça te plaît, n’hésite pas à me soutenir en laissant une petite étoile 👍\n\nPetite astuce : je m’en sers aussi pas mal depuis mon mobile. Il suffit de lancer un tunnel ngrok ou un autre proxy pour accéder au localhost de ton desktop depuis ton smartphone !'
+AINNOTATIONS_VIDEO_IDS = {"K7S2jITU-2I"}
+CUSTOM_REPLY_TEXTS = {"ainnotations": AINNOTATIONS_REPLY}
 PUBLIC_ONLY_REPLIES = {
     "mcp_public_interest": [
         "Merci pour le signal 🙌 Je note l’intérêt pour une vraie démo MCP.",
@@ -37,6 +40,7 @@ CAMPAIGN_URLS = {
     "competence": "https://support.claude.com/fr/articles/12512180-utiliser-les-competences-dans-claude",
     "token_bundle": "Graphify : https://www.youtube.com/watch?v=ZGy7QvLAuXU\nGraphify partie 2 : https://www.youtube.com/watch?v=37mLIY9mW5A",
     "context_bundle": "Graphify : https://www.youtube.com/watch?v=ZGy7QvLAuXU\nGraphify partie 2 : https://www.youtube.com/watch?v=37mLIY9mW5A",
+    "ainnotations": AINNOTATIONS_REPLY,
 }
 VIDEO_CAMPAIGN_URLS = {
     # Same keyword as Claude competence video, different resource.
@@ -61,6 +65,7 @@ KEYWORDS = {
     "token":"token_bundle","tokens":"token_bundle","skill":"token_bundle","skills":"token_bundle",
     "contexte":"context_bundle","context":"context_bundle","contextes":"context_bundle","contexts":"context_bundle","ctx":"context_bundle",
     "mcp":"mcp_public_interest",
+    "outil":"ainnotations","outils":"ainnotations","tool":"ainnotations","tools":"ainnotations",
 }
 
 def fetch(path, params=None):
@@ -120,10 +125,15 @@ def run_scan():
                 con.execute("INSERT OR IGNORE INTO processed_comments (platform, comment_id, keyword, status) VALUES ('youtube', ?, ?, 'ignored')", (cid, matched))
                 con.commit()
                 continue
+            if matched == "ainnotations" and vid not in AINNOTATIONS_VIDEO_IDS:
+                continue
             public_only_replies = PUBLIC_ONLY_REPLIES.get(matched)
             if public_only_replies:
                 reply_text = public_only_replies[sum(ord(ch) for ch in cid) % len(public_only_replies)]
                 status = "public_reply_only"
+            elif matched in CUSTOM_REPLY_TEXTS:
+                reply_text = CUSTOM_REPLY_TEXTS[matched]
+                status = "processed"
             else:
                 reply_text = f"{PUBLIC_REPLY} {VIDEO_CAMPAIGN_URLS.get(vid, CAMPAIGN_URLS.get(matched, CAMPAIGN_URLS['proxy']))}"
                 status = "processed"
