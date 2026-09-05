@@ -1,4 +1,4 @@
-from app.webhook_parser import CommentEvent, parse_comment_events
+from app.webhook_parser import CommentEvent, parse_comment_events, parse_private_message_events
 
 
 def test_parse_instagram_comment_event_from_changes_payload():
@@ -98,3 +98,33 @@ def test_parse_page_feed_ignores_non_add_comment_verbs():
     }
 
     assert parse_comment_events(payload) == []
+
+
+def test_parse_instagram_quick_reply_payload():
+    payload = {
+        "object": "instagram",
+        "entry": [
+            {
+                "messaging": [
+                    {
+                        "sender": {"id": "igsid-1"},
+                        "recipient": {"id": "ig-business"},
+                        "timestamp": 1,
+                        "message": {
+                            "mid": "mid-1",
+                            "text": "✅ J’ai suivi",
+                            "quick_reply": {"payload": "FOLLOW_GATE_CONFIRMED"},
+                        },
+                    }
+                ]
+            }
+        ],
+    }
+
+    events = parse_private_message_events(payload)
+
+    assert len(events) == 1
+    assert events[0].platform == "instagram_dm"
+    assert events[0].sender_id == "igsid-1"
+    assert events[0].text == "✅ J’ai suivi"
+    assert events[0].payload == "FOLLOW_GATE_CONFIRMED"

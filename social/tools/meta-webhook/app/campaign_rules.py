@@ -16,6 +16,7 @@ class CampaignRule:
     public_reply_text: str
     dm_text: str
     enabled: bool = True
+    delivery_mode: str = "direct"
 
 
 class CampaignRuleStore(SQLiteStore):
@@ -26,8 +27,8 @@ class CampaignRuleStore(SQLiteStore):
                 """
                 INSERT INTO campaign_rules (
                     source_task_id, name, platform, media_id, keywords_json,
-                    public_reply_text, dm_text, enabled, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    public_reply_text, dm_text, enabled, delivery_mode, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(source_task_id) DO UPDATE SET
                     name = excluded.name,
                     platform = excluded.platform,
@@ -36,6 +37,7 @@ class CampaignRuleStore(SQLiteStore):
                     public_reply_text = excluded.public_reply_text,
                     dm_text = excluded.dm_text,
                     enabled = excluded.enabled,
+                    delivery_mode = excluded.delivery_mode,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -47,6 +49,7 @@ class CampaignRuleStore(SQLiteStore):
                     rule.public_reply_text,
                     rule.dm_text,
                     int(rule.enabled),
+                    rule.delivery_mode,
                 ),
             )
 
@@ -55,7 +58,7 @@ class CampaignRuleStore(SQLiteStore):
             rows = connection.execute(
                 """
                 SELECT source_task_id, name, platform, media_id, keywords_json,
-                       public_reply_text, dm_text, enabled
+                       public_reply_text, dm_text, enabled, delivery_mode
                 FROM campaign_rules
                 ORDER BY name
                 """
@@ -113,11 +116,15 @@ class CampaignRuleStore(SQLiteStore):
                     public_reply_text TEXT NOT NULL,
                     dm_text TEXT NOT NULL,
                     enabled INTEGER NOT NULL DEFAULT 1,
+                    delivery_mode TEXT NOT NULL DEFAULT 'direct',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(campaign_rules)")}
+            if "delivery_mode" not in columns:
+                connection.execute("ALTER TABLE campaign_rules ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'direct'")
 
     def _rule_from_row(self, row: tuple) -> CampaignRule:
         return CampaignRule(
@@ -129,6 +136,7 @@ class CampaignRuleStore(SQLiteStore):
             public_reply_text=row[5],
             dm_text=row[6],
             enabled=bool(row[7]),
+            delivery_mode=row[8] if len(row) > 8 and row[8] else "direct",
         )
 
     def _specificity(self, rule: CampaignRule, event: CommentEvent) -> tuple[int, int]:

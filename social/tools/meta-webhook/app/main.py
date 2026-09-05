@@ -6,10 +6,12 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 
 from app.campaign_rules import CampaignRuleStore
 from app.config import get_settings
+from app.follow_gate_store import FollowGateStore
 from app.graph_client import GraphClient
 from app.outbound_message_store import OutboundMessageStore
 from app.platform_utils import owner_identity_sets
 from app.processor import CommentProcessor
+from app.processor import PrivateMessageProcessor
 from app.security import verify_meta_signature
 from app.store import ProcessedCommentStore
 from app.comment_review_store import CommentReviewStore
@@ -179,6 +181,8 @@ def create_app() -> FastAPI:
         review_store = CommentReviewStore(settings.processed_comments_database)
         rule_store = CampaignRuleStore(settings.processed_comments_database)
         processed_store = ProcessedCommentStore(settings.processed_comments_database)
+        outbound_store = OutboundMessageStore(settings.processed_comments_database)
+        follow_gate_store = FollowGateStore(settings.processed_comments_database)
 
         async with httpx.AsyncClient(timeout=20) as http_client:
             graph_client = GraphClient(
@@ -203,8 +207,18 @@ def create_app() -> FastAPI:
                 owner_usernames=owner_usernames,
                 interest_only_keywords=_csv_set(settings.interest_only_keywords),
             )
+            private_message_processor = PrivateMessageProcessor(
+                graph_client=graph_client,
+                follow_gate_store=follow_gate_store,
+                processed_store=processed_store,
+                outbound_store=outbound_store,
+            )
+            private_message_results = await private_message_processor.process_events(private_message_events)
+            handled_private_message_ids = {
+                result.message_id for result in private_message_results if result.status == "follow_gate_unlocked"
+            }
             private_messages_enqueued = enqueue_private_message_events(
-                events=private_message_events,
+                events=[event for event in private_message_events if event.message_id not in handled_private_message_ids],
                 review_store=review_store,
                 owner_ids=owner_ids,
             )
@@ -223,8 +237,9 @@ def create_app() -> FastAPI:
             processor = CommentProcessor(
                 graph_client=graph_client,
                 store=processed_store,
-                outbound_store=OutboundMessageStore(settings.processed_comments_database),
+                outbound_store=outbound_store,
                 rule_store=rule_store,
+                follow_gate_store=follow_gate_store,
                 page_id=settings.meta_page_id,
                 keyword=settings.resource_keyword,
                 resource_url=settings.resource_url,
@@ -248,6 +263,7 @@ def create_app() -> FastAPI:
             "manual_review_enqueued": manual_queue_summary.inserted_pending + private_messages_enqueued,
             "private_messages_enqueued": private_messages_enqueued,
             "results": [result.__dict__ for result in results],
+            "private_message_results": [result.__dict__ for result in private_message_results],
         }
 
     return app

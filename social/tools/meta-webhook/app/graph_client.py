@@ -32,30 +32,49 @@ class GraphClient:
         page_id: str,
         comment_id: str,
         text: str,
+        quick_replies: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
-        return await self._private_reply_to_comment(page_id, comment_id, text)
+        return await self._private_reply_to_comment(page_id, comment_id, text, quick_replies=quick_replies)
 
     async def private_reply_to_facebook_comment(self, page_id: str, comment_id: str, text: str) -> dict[str, Any]:
         return await self._private_reply_to_comment(page_id, comment_id, text)
 
-    async def send_direct_message(self, recipient_id: str, text: str) -> dict[str, Any]:
+    async def send_direct_message(
+        self,
+        recipient_id: str,
+        text: str,
+        quick_replies: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        message: dict[str, Any] = {"text": text}
+        if quick_replies:
+            message["quick_replies"] = quick_replies
         return await self._post(
             "/me/messages",
             json={
                 "recipient": {"id": recipient_id},
-                "message": {"text": text},
+                "message": message,
             },
         )
 
     async def get_instagram_comment_media(self, comment_id: str) -> dict[str, Any]:
         return await self._get(f"/{comment_id}", params={"fields": "media{id,permalink,caption}"})
 
-    async def _private_reply_to_comment(self, page_id: str, comment_id: str, text: str) -> dict[str, Any]:
+    async def _private_reply_to_comment(
+        self,
+        page_id: str,
+        comment_id: str,
+        text: str,
+        *,
+        quick_replies: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        message: dict[str, Any] = {"text": text}
+        if quick_replies:
+            message["quick_replies"] = quick_replies
         return await self._post(
             f"/{page_id}/messages",
             json={
                 "recipient": {"comment_id": comment_id},
-                "message": {"text": text},
+                "message": message,
             },
         )
 

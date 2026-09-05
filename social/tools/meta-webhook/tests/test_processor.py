@@ -1,11 +1,15 @@
 import pytest
 
 from app.campaign_rules import CampaignRule, CampaignRuleStore
+from app.follow_gate_store import FollowGateStore
+from app.follow_gate_store import FOLLOW_GATE_CONFIRMATION_PAYLOAD
+from app.processor import PrivateMessageProcessor
 from app.graph_client import GraphAPIError
 from app.outbound_message_store import OutboundMessageStore
 from app.processor import CommentProcessor, ProcessingResult
 from app.store import ProcessedCommentStore
 from app.webhook_parser import CommentEvent
+from app.webhook_parser import PrivateMessageEvent
 
 
 class FakeGraphClient:
@@ -20,9 +24,13 @@ class FakeGraphClient:
         self.calls.append(("public_reply", comment_id, message))
         return {"id": "reply-id"}
 
-    async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str):
-        self.calls.append(("private_reply", page_id, comment_id, text))
+    async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str, quick_replies=None):
+        self.calls.append(("private_reply", page_id, comment_id, text, quick_replies))
         return {"message_id": "message-id"}
+
+    async def send_direct_message(self, recipient_id: str, text: str, quick_replies=None):
+        self.calls.append(("direct_message", recipient_id, text, quick_replies))
+        return {"message_id": "direct-message-id"}
 
     async def reply_to_facebook_comment(self, comment_id: str, message: str):
         self.calls.append(("facebook_public_reply", comment_id, message))
@@ -56,8 +64,8 @@ class FacebookPrivateReplyBlockedGraphClient(FakeGraphClient):
 
 
 class InstagramPrivateReplyBlockedGraphClient(FakeGraphClient):
-    async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str):
-        self.calls.append(("private_reply", page_id, comment_id, text))
+    async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str, quick_replies=None):
+        self.calls.append(("private_reply", page_id, comment_id, text, quick_replies))
         raise GraphAPIError("Meta Graph API error 10901: Activity replying time expired")
 
 
@@ -88,7 +96,7 @@ async def test_processor_handles_matching_instagram_comment_once(tmp_path):
     assert first == [ProcessingResult(comment_id="comment-1", status="processed")]
     assert second == [ProcessingResult(comment_id="comment-1", status="duplicate")]
     assert graph.calls == [
-        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
+        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy", None),
         ("public_reply", "comment-1", "C'est envoyé, check tes DM"),
     ]
 
@@ -187,7 +195,7 @@ async def test_processor_uses_default_public_reply_when_config_is_blank(tmp_path
 
     assert result == [ProcessingResult(comment_id="comment-1", status="processed")]
     assert graph.calls == [
-        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
+        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy", None),
         ("public_reply", "comment-1", "C'est envoyé ! Check tes messages privés !"),
     ]
 
@@ -302,7 +310,7 @@ async def test_processor_returns_failed_status_when_graph_api_fails_and_allows_r
 
     assert failed == [ProcessingResult(comment_id="comment-1", status="failed_graph_api")]
     assert failing_graph.calls == [
-        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
+        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy", None),
         ("public_reply", "comment-1", "C'est envoyé, check tes DM"),
     ]
 
@@ -413,7 +421,7 @@ async def test_processor_uses_fallback_when_instagram_private_reply_fails_before
 
     assert result == [ProcessingResult(comment_id="comment-1", status="private_reply_blocked")]
     assert graph.calls == [
-        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
+        ("private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy", None),
         (
             "public_reply",
             "comment-1",
@@ -455,3 +463,97 @@ async def test_processor_records_outbound_public_reply_and_private_reply(tmp_pat
         "Voici la ressource demandée : https://example.com/proxy",
     ]
     assert [row["meta_response_id"] for row in rows] == ["reply-id", "message-id"]
+
+
+@pytest.mark.asyncio
+async def test_follow_gate_prompts_first_then_unlocks_on_instagram_confirmation(tmp_path):
+    database = tmp_path / "processed.sqlite3"
+    store = ProcessedCommentStore(database)
+    outbound_store = OutboundMessageStore(database)
+    gate_store = FollowGateStore(database)
+    rule_store = CampaignRuleStore(database)
+    rule_store.upsert_rule(
+        CampaignRule(
+            source_task_id="blog",
+            name="Blog",
+            platform="instagram",
+            media_id="media-1",
+            keywords=["blog"],
+            public_reply_text="Je t’envoie les étapes en privé",
+            dm_text="Voici le lien final",
+            enabled=True,
+            delivery_mode="follow_gate",
+        )
+    )
+    graph = FakeGraphClient()
+    processor = CommentProcessor(
+        graph_client=graph,
+        store=store,
+        outbound_store=outbound_store,
+        rule_store=rule_store,
+        follow_gate_store=gate_store,
+        page_id="page-1",
+    )
+    event = CommentEvent(
+        platform="instagram",
+        comment_id="comment-1",
+        text="Blog",
+        media_id="media-1",
+        author_id="igsid-1",
+        username="alice",
+    )
+
+    result = await processor.process_events([event])
+
+    assert result == [ProcessingResult(comment_id="comment-1", status="follow_gate_pending")]
+    assert graph.calls[0][0:3] == ("private_reply", "page-1", "comment-1")
+    assert graph.calls[0][4] == [{"content_type": "text", "title": "✅ J’ai suivi", "payload": "FOLLOW_GATE_CONFIRMED"}]
+    assert graph.calls[1] == ("public_reply", "comment-1", "Je t’envoie les étapes en privé")
+    assert store.delivery_state("instagram", "comment-1") == {
+        "status": "follow_gate_pending",
+        "like_sent": False,
+        "public_reply_sent": True,
+        "dm_sent": False,
+    }
+
+    private_processor = PrivateMessageProcessor(
+        graph_client=graph,
+        follow_gate_store=gate_store,
+        processed_store=store,
+        outbound_store=outbound_store,
+    )
+    dm_event = PrivateMessageEvent(
+        platform="instagram_dm",
+        message_id="mid-1",
+        text="✅ J’ai suivi",
+        sender_id="igsid-1",
+        recipient_id="page-1",
+        payload=FOLLOW_GATE_CONFIRMATION_PAYLOAD,
+    )
+
+    unlocked = await private_processor.process_events([dm_event])
+
+    assert unlocked[0].status == "follow_gate_unlocked"
+    assert graph.calls[-1] == ("direct_message", "igsid-1", "Voici le lien final", None)
+    assert store.delivery_state("instagram", "comment-1") == {
+        "status": "processed",
+        "like_sent": False,
+        "public_reply_sent": True,
+        "dm_sent": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_follow_gate_confirmation_without_pending_gate_is_not_handled(tmp_path):
+    database = tmp_path / "processed.sqlite3"
+    graph = FakeGraphClient()
+    processor = PrivateMessageProcessor(
+        graph_client=graph,
+        follow_gate_store=FollowGateStore(database),
+        processed_store=ProcessedCommentStore(database),
+    )
+
+    result = await processor.process_events([PrivateMessageEvent("instagram_dm", "mid-1", "j'ai suivi", "igsid-1")])
+
+    assert result[0].status == "no_pending_follow_gate"
+    assert graph.calls == []

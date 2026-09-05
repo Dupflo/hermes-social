@@ -4,6 +4,10 @@ from typing import Protocol
 
 from app.campaign_rules import CampaignRule
 from app.campaign_rules import CampaignRuleStore
+from app.follow_gate_store import FollowGateStore
+from app.follow_gate_store import follow_gate_prompt_text
+from app.follow_gate_store import follow_gate_quick_replies
+from app.follow_gate_store import is_follow_gate_confirmation
 from app.graph_client import GraphAPIError
 from app.keyword import contains_keyword
 from app.outbound_message_store import OutboundMessageStore
@@ -11,6 +15,7 @@ from app.platform_utils import facebook_graph_comment_id
 from app.platform_utils import is_owner_comment_event
 from app.store import ProcessedCommentStore
 from app.webhook_parser import CommentEvent
+from app.webhook_parser import PrivateMessageEvent
 
 
 logger = logging.getLogger(__name__)
@@ -28,11 +33,19 @@ class CommentGraphClient(Protocol):
         page_id: str,
         comment_id: str,
         text: str,
+        quick_replies: list[dict[str, str]] | None = None,
     ) -> dict: ...
 
     async def private_reply_to_facebook_comment(self, page_id: str, comment_id: str, text: str) -> dict: ...
 
     async def can_reply_privately_to_facebook_comment(self, comment_id: str) -> bool: ...
+
+    async def send_direct_message(
+        self,
+        recipient_id: str,
+        text: str,
+        quick_replies: list[dict[str, str]] | None = None,
+    ) -> dict: ...
 
 
 FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT = (
@@ -75,6 +88,7 @@ class CommentProcessor:
         store: ProcessedCommentStore,
         outbound_store: OutboundMessageStore | None = None,
         rule_store: CampaignRuleStore | None = None,
+        follow_gate_store: FollowGateStore | None = None,
         page_id: str,
         keyword: str = "proxy",
         resource_url: str = "",
@@ -86,6 +100,7 @@ class CommentProcessor:
         self.store = store
         self.outbound_store = outbound_store
         self.rule_store = rule_store
+        self.follow_gate_store = follow_gate_store
         self.page_id = page_id
         self.keyword = keyword
         self.resource_url = resource_url
@@ -216,52 +231,102 @@ class CommentProcessor:
                     )
             else:
                 if not already_dm_sent:
-                    try:
-                        result = await self.graph_client.private_reply_to_instagram_comment(
-                            page_id=self.page_id,
-                            comment_id=graph_comment_id,
-                            text=dm_text,
-                        )
-                        self._record_outbound(
-                            platform=event.platform,
-                            source_id=event.comment_id,
-                            recipient_id=graph_comment_id,
-                            message_type="private_reply",
-                            message_text=dm_text,
-                            result=result,
-                        )
-                        dm_sent = True
-                        self.store.mark_processed(
-                            platform=event.platform,
-                            comment_id=event.comment_id,
-                            keyword=keyword,
-                            like_sent=like_sent,
-                            public_reply_sent=public_reply_sent,
-                            dm_sent=dm_sent,
-                        )
-                    except GraphAPIError:
-                        if not already_public_replied:
-                            result = await self.graph_client.reply_to_instagram_comment(
-                                graph_comment_id,
-                                FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                    if rule.delivery_mode == "follow_gate" and self.follow_gate_store is not None and event.author_id:
+                        prompt_text = follow_gate_prompt_text()
+                        try:
+                            result = await self.graph_client.private_reply_to_instagram_comment(
+                                page_id=self.page_id,
+                                comment_id=graph_comment_id,
+                                text=prompt_text,
+                                quick_replies=follow_gate_quick_replies(),
+                            )
+                            self._record_outbound(
+                                platform=event.platform,
+                                source_id=event.comment_id,
+                                recipient_id=event.author_id,
+                                message_type="follow_gate_prompt",
+                                message_text=prompt_text,
+                                result=result,
+                            )
+                            self.follow_gate_store.create_pending(
+                                platform=event.platform,
+                                comment_id=event.comment_id,
+                                sender_id=event.author_id,
+                                campaign=rule.source_task_id,
+                                keyword=keyword,
+                                dm_text=dm_text,
+                            )
+                            return_status = "follow_gate_pending"
+                        except GraphAPIError:
+                            if not already_public_replied:
+                                result = await self.graph_client.reply_to_instagram_comment(
+                                    graph_comment_id,
+                                    FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                                )
+                                self._record_outbound(
+                                    platform=event.platform,
+                                    source_id=event.comment_id,
+                                    recipient_id=graph_comment_id,
+                                    message_type="public_reply",
+                                    message_text=FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                                    result=result,
+                                )
+                                public_reply_sent = True
+                            self.store.mark_private_reply_blocked(
+                                platform=event.platform,
+                                comment_id=event.comment_id,
+                                keyword=keyword,
+                                like_sent=like_sent,
+                                public_reply_sent=public_reply_sent,
+                            )
+                            return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
+                    else:
+                        try:
+                            result = await self.graph_client.private_reply_to_instagram_comment(
+                                page_id=self.page_id,
+                                comment_id=graph_comment_id,
+                                text=dm_text,
                             )
                             self._record_outbound(
                                 platform=event.platform,
                                 source_id=event.comment_id,
                                 recipient_id=graph_comment_id,
-                                message_type="public_reply",
-                                message_text=FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                                message_type="private_reply",
+                                message_text=dm_text,
                                 result=result,
                             )
-                            public_reply_sent = True
-                        self.store.mark_private_reply_blocked(
-                            platform=event.platform,
-                            comment_id=event.comment_id,
-                            keyword=keyword,
-                            like_sent=like_sent,
-                            public_reply_sent=public_reply_sent,
-                        )
-                        return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
+                            dm_sent = True
+                            self.store.mark_processed(
+                                platform=event.platform,
+                                comment_id=event.comment_id,
+                                keyword=keyword,
+                                like_sent=like_sent,
+                                public_reply_sent=public_reply_sent,
+                                dm_sent=dm_sent,
+                            )
+                        except GraphAPIError:
+                            if not already_public_replied:
+                                result = await self.graph_client.reply_to_instagram_comment(
+                                    graph_comment_id,
+                                    FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                                )
+                                self._record_outbound(
+                                    platform=event.platform,
+                                    source_id=event.comment_id,
+                                    recipient_id=graph_comment_id,
+                                    message_type="public_reply",
+                                    message_text=FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                                    result=result,
+                                )
+                                public_reply_sent = True
+                            self.store.mark_private_reply_blocked(
+                                platform=event.platform,
+                                comment_id=event.comment_id,
+                                keyword=keyword,
+                                like_sent=like_sent,
+                                public_reply_sent=public_reply_sent,
+                            )
+                            return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
                 if not already_public_replied:
                     result = await self.graph_client.reply_to_instagram_comment(graph_comment_id, public_reply_text)
                     self._record_outbound(
@@ -281,6 +346,15 @@ class CommentProcessor:
                         public_reply_sent=public_reply_sent,
                         dm_sent=dm_sent,
                     )
+                if 'return_status' in locals() and return_status == "follow_gate_pending":
+                    self.store.mark_follow_gate_pending(
+                        platform=event.platform,
+                        comment_id=event.comment_id,
+                        keyword=keyword,
+                        like_sent=like_sent,
+                        public_reply_sent=public_reply_sent,
+                    )
+                    return ProcessingResult(comment_id=event.comment_id, status="follow_gate_pending")
         except GraphAPIError as error:
             logger.exception("Meta Graph API action failed for comment_id=%s", event.comment_id)
             self.store.mark_failed(
@@ -325,3 +399,65 @@ class CommentProcessor:
             message_text=message_text,
             meta_response_id=str(result.get("message_id") or result.get("id") or "") or None,
         )
+
+
+@dataclass(frozen=True)
+class PrivateMessageProcessingResult:
+    message_id: str
+    status: str
+
+
+class PrivateMessageProcessor:
+    def __init__(
+        self,
+        *,
+        graph_client: CommentGraphClient,
+        follow_gate_store: FollowGateStore,
+        processed_store: ProcessedCommentStore,
+        outbound_store: OutboundMessageStore | None = None,
+    ) -> None:
+        self.graph_client = graph_client
+        self.follow_gate_store = follow_gate_store
+        self.processed_store = processed_store
+        self.outbound_store = outbound_store
+
+    async def process_events(self, events: list[PrivateMessageEvent]) -> list[PrivateMessageProcessingResult]:
+        results = []
+        for event in events:
+            results.append(await self._process_event(event))
+        return results
+
+    async def _process_event(self, event: PrivateMessageEvent) -> PrivateMessageProcessingResult:
+        if event.platform != "instagram_dm" or not event.sender_id:
+            return PrivateMessageProcessingResult(event.message_id, "ignored")
+        if not is_follow_gate_confirmation(event.payload or event.text):
+            return PrivateMessageProcessingResult(event.message_id, "ignored")
+        gate = self.follow_gate_store.pending_for_sender("instagram", event.sender_id)
+        if gate is None:
+            return PrivateMessageProcessingResult(event.message_id, "no_pending_follow_gate")
+        try:
+            result = await self.graph_client.send_direct_message(event.sender_id, gate.dm_text)
+        except GraphAPIError as error:
+            logger.exception("Failed to unlock follow gate for sender_id=%s", event.sender_id)
+            return PrivateMessageProcessingResult(event.message_id, f"failed_graph_api:{error}")
+        if self.outbound_store is not None:
+            self.outbound_store.record_sent(
+                platform="instagram",
+                source_type="follow_gate",
+                source_id=gate.comment_id,
+                recipient_id=event.sender_id,
+                message_type="private_reply",
+                message_text=gate.dm_text,
+                meta_response_id=str(result.get("message_id") or result.get("id") or "") or None,
+            )
+        self.follow_gate_store.mark_unlocked("instagram", gate.comment_id)
+        state = self.processed_store.delivery_state("instagram", gate.comment_id) or {}
+        self.processed_store.mark_processed(
+            platform="instagram",
+            comment_id=gate.comment_id,
+            keyword=gate.keyword,
+            like_sent=bool(state.get("like_sent")),
+            public_reply_sent=bool(state.get("public_reply_sent")),
+            dm_sent=True,
+        )
+        return PrivateMessageProcessingResult(event.message_id, "follow_gate_unlocked")

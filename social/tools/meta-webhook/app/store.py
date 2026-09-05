@@ -114,6 +114,34 @@ class ProcessedCommentStore(SQLiteStore):
                 ),
             )
 
+
+    def mark_follow_gate_pending(
+        self,
+        *,
+        platform: str,
+        comment_id: str,
+        keyword: str,
+        like_sent: bool,
+        public_reply_sent: bool,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO processed_comments (
+                    platform, comment_id, keyword, status,
+                    like_sent, public_reply_sent, dm_sent, processed_at
+                ) VALUES (?, ?, ?, 'follow_gate_pending', ?, ?, 0, CURRENT_TIMESTAMP)
+                ON CONFLICT(platform, comment_id) DO UPDATE SET
+                    keyword = excluded.keyword,
+                    status = 'follow_gate_pending',
+                    like_sent = MAX(processed_comments.like_sent, excluded.like_sent),
+                    public_reply_sent = MAX(processed_comments.public_reply_sent, excluded.public_reply_sent),
+                    dm_sent = 0,
+                    processed_at = CURRENT_TIMESTAMP
+                """,
+                (platform, comment_id, keyword, int(like_sent), int(public_reply_sent)),
+            )
+
     def mark_failed(
         self,
         *,

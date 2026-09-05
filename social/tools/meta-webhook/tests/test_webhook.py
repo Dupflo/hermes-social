@@ -123,6 +123,7 @@ def test_webhook_post_accepts_valid_signature_and_ignores_non_matching_keyword(m
         "manual_review_enqueued": 0,
         "private_messages_enqueued": 0,
         "results": [],
+        "private_message_results": [],
     }
 
 

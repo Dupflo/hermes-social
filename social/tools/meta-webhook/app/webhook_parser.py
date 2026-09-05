@@ -21,6 +21,7 @@ class PrivateMessageEvent:
     sender_id: str | None = None
     recipient_id: str | None = None
     timestamp: int | None = None
+    payload: str | None = None
 
 
 def parse_comment_events(payload: dict[str, Any]) -> list[CommentEvent]:
@@ -43,8 +44,11 @@ def parse_private_message_events(payload: dict[str, Any]) -> list[PrivateMessage
     for entry in payload.get("entry", []):
         for message in entry.get("messaging", []):
             message_body = message.get("message") or {}
-            text = message_body.get("text")
-            message_id = message_body.get("mid") or message_body.get("id")
+            postback_body = message.get("postback") or {}
+            quick_reply = message_body.get("quick_reply") or {}
+            payload_text = quick_reply.get("payload") or postback_body.get("payload")
+            text = message_body.get("text") or postback_body.get("title") or payload_text
+            message_id = message_body.get("mid") or message_body.get("id") or postback_body.get("mid") or postback_body.get("id")
             if not message_id or text is None:
                 continue
             sender = message.get("sender") or {}
@@ -57,6 +61,7 @@ def parse_private_message_events(payload: dict[str, Any]) -> list[PrivateMessage
                     sender_id=sender.get("id"),
                     recipient_id=recipient.get("id"),
                     timestamp=message.get("timestamp"),
+                    payload=payload_text,
                 )
             )
     return events
