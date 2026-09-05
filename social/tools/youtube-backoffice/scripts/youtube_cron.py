@@ -20,6 +20,15 @@ INTEREST_ONLY = {k.strip() for k in env_val("INTEREST_ONLY_KEYWORDS").split(",")
 AINNOTATIONS_REPLY = 'Hey ! Voici le lien vers ainnotations :\n\nhttps://github.com/Dupflo/ainnotations\n\nC’est un outil que j’ai moi-même conçu. Je suis vraiment preneur de retours, et si ça te plaît, n’hésite pas à me soutenir en laissant une petite étoile 👍\n\nPetite astuce : je m’en sers aussi pas mal depuis mon mobile. Il suffit de lancer un tunnel ngrok ou un autre proxy pour accéder au localhost de ton desktop depuis ton smartphone !'
 AINNOTATIONS_VIDEO_IDS = {"K7S2jITU-2I"}
 CUSTOM_REPLY_TEXTS = {"ainnotations": AINNOTATIONS_REPLY}
+
+BLOG_REPLY_VARIANTS = [
+    "Super, je suis content de voir que ce sujet t’intéresse. Voilà l’article : {url}",
+    "Trop bien, ça me fait plaisir que ce format plus avancé intéresse aussi. Voilà le lien : {url}",
+    "Yes, ravi de voir que tu as envie de creuser le sujet. Voici l’article : {url}",
+    "Merci ! Je ne savais pas si ce sujet était adapté au format court, donc content de voir que ça intéresse. L’article est ici : {url}",
+    "Excellent, ça me confirme que certains veulent aussi lire des contenus plus poussés. Voici le lien : {url}",
+]
+BLOG_VIDEO_IDS = {"MBj3bE98_-g"}
 PUBLIC_ONLY_REPLIES = {
     "mcp_public_interest": [
         "Merci pour le signal 🙌 Je note l’intérêt pour une vraie démo MCP.",
@@ -41,6 +50,7 @@ CAMPAIGN_URLS = {
     "token_bundle": "Graphify : https://www.youtube.com/watch?v=ZGy7QvLAuXU\nGraphify partie 2 : https://www.youtube.com/watch?v=37mLIY9mW5A",
     "context_bundle": "Graphify : https://www.youtube.com/watch?v=ZGy7QvLAuXU\nGraphify partie 2 : https://www.youtube.com/watch?v=37mLIY9mW5A",
     "ainnotations": AINNOTATIONS_REPLY,
+    "blog_article": "https://dupflo.dev/fr/blog/le-vibe-coding-na-pas-quune-seule-definition",
 }
 VIDEO_CAMPAIGN_URLS = {
     # Same keyword as Claude competence video, different resource.
@@ -66,6 +76,7 @@ KEYWORDS = {
     "contexte":"context_bundle","context":"context_bundle","contextes":"context_bundle","contexts":"context_bundle","ctx":"context_bundle",
     "mcp":"mcp_public_interest",
     "outil":"ainnotations","outils":"ainnotations","tool":"ainnotations","tools":"ainnotations",
+    "blog":"blog_article",
 }
 
 def fetch(path, params=None):
@@ -127,10 +138,15 @@ def run_scan():
                 continue
             if matched == "ainnotations" and vid not in AINNOTATIONS_VIDEO_IDS:
                 continue
+            if matched == "blog_article" and vid not in BLOG_VIDEO_IDS:
+                continue
             public_only_replies = PUBLIC_ONLY_REPLIES.get(matched)
             if public_only_replies:
                 reply_text = public_only_replies[sum(ord(ch) for ch in cid) % len(public_only_replies)]
                 status = "public_reply_only"
+            elif matched == "blog_article":
+                reply_text = BLOG_REPLY_VARIANTS[sum(ord(ch) for ch in cid) % len(BLOG_REPLY_VARIANTS)].format(url=CAMPAIGN_URLS["blog_article"])
+                status = "processed"
             elif matched in CUSTOM_REPLY_TEXTS:
                 reply_text = CUSTOM_REPLY_TEXTS[matched]
                 status = "processed"

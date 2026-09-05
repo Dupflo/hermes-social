@@ -45,8 +45,15 @@ FACEBOOK_DM_INVITATION_CONFIRMATION_TEXT = (
 DEFAULT_DM_CONFIRMATION_TEXT = "C'est envoyé ! Check tes messages privés !"
 
 
-def public_reply_for_platform(platform: str, base_text: str) -> str:
-    text = (base_text or DEFAULT_DM_CONFIRMATION_TEXT).strip() or DEFAULT_DM_CONFIRMATION_TEXT
+def select_public_reply_variant(base_text: str, comment_id: str) -> str:
+    variants = [part.strip() for part in (base_text or "").split("---VARIANT---") if part.strip()]
+    if not variants:
+        return DEFAULT_DM_CONFIRMATION_TEXT
+    return variants[sum(ord(ch) for ch in comment_id) % len(variants)]
+
+
+def public_reply_for_platform(platform: str, base_text: str, comment_id: str = "") -> str:
+    text = select_public_reply_variant(base_text, comment_id).strip() or DEFAULT_DM_CONFIRMATION_TEXT
     if platform == "facebook" and text.lower().startswith("c'est envoyé"):
         return FACEBOOK_DM_INVITATION_CONFIRMATION_TEXT
     if platform == "instagram" and "Messenger" in text:
@@ -121,7 +128,7 @@ class CommentProcessor:
             )
 
         keyword = rule.keywords[0]
-        public_reply_text = public_reply_for_platform(event.platform, rule.public_reply_text)
+        public_reply_text = public_reply_for_platform(event.platform, rule.public_reply_text, event.comment_id)
         dm_text = rule.dm_text.strip()
         if not dm_text:
             return ProcessingResult(comment_id=event.comment_id, status="ignored")
