@@ -42,7 +42,7 @@ def follow_gate_prompt_text() -> str:
     return (
         "Trop cool que ça t’intéresse 🙌\n\n"
         "Je réserve ce contenu aux personnes abonnées. "
-        "Abonne-toi au compte, puis clique sur « ✅ J’ai suivi » et je t’envoie le lien."
+        "Abonne-toi au compte, puis réponds « ✅ J’ai suivi » et je t’envoie le lien."
     )
 
 
