@@ -40,8 +40,8 @@ def is_follow_gate_confirmation(text: str) -> bool:
 
 def follow_gate_prompt_text() -> str:
     return (
-        "Trop cool que ça t’intéresse 🙌\n\n"
-        "Je réserve ce contenu aux personnes abonnées. "
+        "Hello 👋\n\n"
+        "Trop cool que ça t’intéresse 🙌 Je réserve ce contenu aux personnes abonnées. "
         "Abonne-toi au compte, puis réponds « ✅ J’ai suivi » et je t’envoie le lien."
     )
 

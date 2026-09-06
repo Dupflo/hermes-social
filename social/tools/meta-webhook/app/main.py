@@ -212,6 +212,7 @@ def create_app() -> FastAPI:
                 follow_gate_store=follow_gate_store,
                 processed_store=processed_store,
                 outbound_store=outbound_store,
+                page_id=settings.meta_page_id,
             )
             private_message_results = await private_message_processor.process_events(private_message_events)
             handled_private_message_ids = {

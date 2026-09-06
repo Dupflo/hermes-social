@@ -534,7 +534,7 @@ async def test_follow_gate_prompts_first_then_unlocks_on_instagram_confirmation(
     unlocked = await private_processor.process_events([dm_event])
 
     assert unlocked[0].status == "follow_gate_unlocked"
-    assert graph.calls[-1] == ("direct_message", "igsid-1", "Voici le lien final", None)
+    assert graph.calls[-1] == ("private_reply", "page-1", "comment-1", "Voici le lien final", None)
     assert store.delivery_state("instagram", "comment-1") == {
         "status": "processed",
         "like_sent": False,

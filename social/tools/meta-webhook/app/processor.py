@@ -415,11 +415,13 @@ class PrivateMessageProcessor:
         follow_gate_store: FollowGateStore,
         processed_store: ProcessedCommentStore,
         outbound_store: OutboundMessageStore | None = None,
+        page_id: str = "",
     ) -> None:
         self.graph_client = graph_client
         self.follow_gate_store = follow_gate_store
         self.processed_store = processed_store
         self.outbound_store = outbound_store
+        self.page_id = page_id
 
     async def process_events(self, events: list[PrivateMessageEvent]) -> list[PrivateMessageProcessingResult]:
         results = []
@@ -436,7 +438,15 @@ class PrivateMessageProcessor:
         if gate is None:
             return PrivateMessageProcessingResult(event.message_id, "no_pending_follow_gate")
         try:
-            result = await self.graph_client.send_direct_message(event.sender_id, gate.dm_text)
+            # Without Advanced Access to instagram_manage_messages, Meta rejects a normal
+            # DM to the IGSID even after the user taps the quick reply. A second
+            # private reply scoped to the original comment is still allowed inside
+            # the comment private-reply window, so use recipient.comment_id here.
+            result = await self.graph_client.private_reply_to_instagram_comment(
+                self.page_id or event.recipient_id or "me",
+                gate.comment_id,
+                gate.dm_text,
+            )
         except GraphAPIError as error:
             logger.exception("Failed to unlock follow gate for sender_id=%s", event.sender_id)
             return PrivateMessageProcessingResult(event.message_id, f"failed_graph_api:{error}")
