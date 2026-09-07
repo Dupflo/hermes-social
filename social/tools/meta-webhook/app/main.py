@@ -170,15 +170,18 @@ def create_app() -> FastAPI:
     async def receive_webhook(request: Request) -> dict[str, int | str | list[dict[str, str]]]:
         settings = get_settings()
         raw_body = await request.body()
-        signature = request.headers.get("X-Hub-Signature-256") or request.headers.get("X-Hub-Signature")
-        if not verify_meta_signature(raw_body, signature, settings.meta_app_secret):
+        signatures = [
+            request.headers.get("X-Hub-Signature-256"),
+            request.headers.get("X-Hub-Signature"),
+        ]
+        if not any(verify_meta_signature(raw_body, sig, settings.meta_app_secret) for sig in signatures if sig):
             import logging
 
             logging.getLogger("meta_webhook").warning(
-                "signature_rejected sha256_header_present=%s legacy_header_present=%s sig_len=%s secret_len=%s",
-                bool(request.headers.get("X-Hub-Signature-256")),
-                bool(request.headers.get("X-Hub-Signature")),
-                len(signature) if signature else 0,
+                "signature_rejected sha256_header_present=%s legacy_header_present=%s sig_lens=%s secret_len=%s",
+                bool(signatures[0]),
+                bool(signatures[1]),
+                [len(sig) for sig in signatures if sig],
                 len(settings.meta_app_secret),
             )
             raise HTTPException(status_code=403, detail="Invalid Meta signature")

@@ -363,3 +363,26 @@ async def test_hydrate_missing_instagram_media_resolves_media_id():
     assert hydrated[0].media_id == "ig-media-resolved"
     assert hydrated[0].comment_id == "ig-comment-without-media"
     assert hydrated[1] == events[1]
+
+
+def test_webhook_accepts_legacy_signature_when_sha256_header_is_invalid(monkeypatch):
+    monkeypatch.setenv("META_APP_SECRET", "secret")
+    monkeypatch.setenv("META_PAGE_ACCESS_TOKEN", "token")
+    monkeypatch.setenv("META_PAGE_ID", "page-1")
+    monkeypatch.setenv("META_PAGE_IDS", "page-1")
+
+    body = json.dumps({"object": "instagram", "entry": []}).encode()
+    legacy = hmac.new(b"secret", body, hashlib.sha1).hexdigest()
+    client = TestClient(create_app())
+
+    response = client.post(
+        "/webhook/meta",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Hub-Signature-256": "sha256=bad",
+            "X-Hub-Signature": f"sha1={legacy}",
+        },
+    )
+
+    assert response.status_code == 200
