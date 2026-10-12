@@ -222,10 +222,14 @@ class CommentProcessor:
                             text=prompt_text,
                             quick_replies=follow_gate_quick_replies(),
                         )
+                        # The private reply response carries the user's page-scoped ID,
+                        # the same ID the Messenger webhook reports when they answer.
+                        # Feed webhooks often omit `from`, so author_id is a fallback.
+                        recipient_psid = str(result.get("recipient_id") or event.author_id or event.comment_id)
                         self._record_outbound(
                             platform=event.platform,
                             source_id=event.comment_id,
-                            recipient_id=event.author_id or event.comment_id,
+                            recipient_id=recipient_psid,
                             message_type="follow_gate_prompt",
                             message_text=prompt_text,
                             result=result,
@@ -233,7 +237,7 @@ class CommentProcessor:
                         self.follow_gate_store.create_pending(
                             platform=event.platform,
                             comment_id=event.comment_id,
-                            sender_id=event.author_id or event.comment_id,
+                            sender_id=recipient_psid,
                             campaign=rule.source_task_id,
                             keyword=keyword,
                             dm_text=dm_text,
@@ -258,37 +262,60 @@ class CommentProcessor:
                         public_reply_sent=public_reply_sent,
                     )
                     return ProcessingResult(comment_id=event.comment_id, status="follow_gate_pending")
-                if not already_public_replied:
-                    reply_text = public_reply_text if can_send_private_reply else FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT
-                    result = await self.graph_client.reply_to_facebook_comment(graph_comment_id, reply_text)
-                    self._record_outbound(
+                if not can_send_private_reply:
+                    if not already_public_replied:
+                        result = await self.graph_client.reply_to_facebook_comment(
+                            graph_comment_id, FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT
+                        )
+                        self._record_outbound(
+                            platform=event.platform,
+                            source_id=event.comment_id,
+                            recipient_id=graph_comment_id,
+                            message_type="public_reply",
+                            message_text=FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                            result=result,
+                        )
+                        public_reply_sent = True
+                    self.store.mark_private_reply_blocked(
                         platform=event.platform,
-                        source_id=event.comment_id,
-                        recipient_id=graph_comment_id,
-                        message_type="public_reply",
-                        message_text=reply_text,
-                        result=result,
+                        comment_id=event.comment_id,
+                        keyword=keyword,
+                        like_sent=like_sent,
+                        public_reply_sent=public_reply_sent,
                     )
-                    public_reply_sent = True
-                    if not can_send_private_reply:
+                    return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
+                # DM first: the public reply announces it ("C'est envoyé…"), so it
+                # must not go out if the private reply fails.
+                if not already_dm_sent:
+                    try:
+                        result = await self.graph_client.private_reply_to_facebook_comment(
+                            self.page_id, event.comment_id, dm_text
+                        )
+                    except GraphAPIError as error:
+                        if not error.blocks_private_reply:
+                            raise
+                        if not already_public_replied:
+                            fallback = await self.graph_client.reply_to_facebook_comment(
+                                graph_comment_id, FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT
+                            )
+                            self._record_outbound(
+                                platform=event.platform,
+                                source_id=event.comment_id,
+                                recipient_id=graph_comment_id,
+                                message_type="public_reply",
+                                message_text=FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                                result=fallback,
+                            )
+                            public_reply_sent = True
                         self.store.mark_private_reply_blocked(
                             platform=event.platform,
                             comment_id=event.comment_id,
                             keyword=keyword,
                             like_sent=like_sent,
                             public_reply_sent=public_reply_sent,
+                            error_message=str(error),
                         )
                         return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
-                    self.store.mark_processed(
-                        platform=event.platform,
-                        comment_id=event.comment_id,
-                        keyword=keyword,
-                        like_sent=like_sent,
-                        public_reply_sent=public_reply_sent,
-                        dm_sent=dm_sent,
-                    )
-                if not already_dm_sent and can_send_private_reply:
-                    result = await self.graph_client.private_reply_to_facebook_comment(self.page_id, event.comment_id, dm_text)
                     self._record_outbound(
                         platform=event.platform,
                         source_id=event.comment_id,
@@ -306,6 +333,17 @@ class CommentProcessor:
                         public_reply_sent=public_reply_sent,
                         dm_sent=dm_sent,
                     )
+                if not already_public_replied:
+                    result = await self.graph_client.reply_to_facebook_comment(graph_comment_id, public_reply_text)
+                    self._record_outbound(
+                        platform=event.platform,
+                        source_id=event.comment_id,
+                        recipient_id=graph_comment_id,
+                        message_type="public_reply",
+                        message_text=public_reply_text,
+                        result=result,
+                    )
+                    public_reply_sent = True
             else:
                 if not already_dm_sent:
                     if rule.delivery_mode == "follow_gate" and not self.instagram_messaging_enabled:

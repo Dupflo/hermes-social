@@ -132,8 +132,8 @@ async def test_processor_likes_matching_facebook_comment(tmp_path):
     assert graph.calls == [
         ("like", "comment-1"),
         ("facebook_can_reply_privately", "comment-1"),
-        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
         ("facebook_private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
+        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
     ]
 
 
@@ -157,8 +157,8 @@ async def test_processor_uses_short_graph_comment_id_for_facebook_actions(tmp_pa
     assert graph.calls == [
         ("like", "comment-1"),
         ("facebook_can_reply_privately", "post-1_comment-1"),
-        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
         ("facebook_private_reply", "page-1", "post-1_comment-1", "Voici la ressource demandée : https://example.com/proxy"),
+        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
     ]
     assert store.was_processed("facebook", "post-1_comment-1") is True
 
@@ -183,8 +183,8 @@ async def test_processor_continues_facebook_flow_when_like_fails(tmp_path):
     assert graph.calls == [
         ("like", "comment-1"),
         ("facebook_can_reply_privately", "comment-1"),
-        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
         ("facebook_private_reply", "page-1", "comment-1", "Voici la ressource demandée : https://example.com/proxy"),
+        ("facebook_public_reply", "comment-1", "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."),
     ]
 
 
@@ -526,12 +526,12 @@ async def test_processor_records_outbound_public_reply_and_private_reply(tmp_pat
 
     assert result == [ProcessingResult(comment_id="post-1_comment-1", status="processed")]
     rows = outbound_store.list_for_source("facebook", "post-1_comment-1")
-    assert [row["message_type"] for row in rows] == ["public_reply", "private_reply"]
+    assert [row["message_type"] for row in rows] == ["private_reply", "public_reply"]
     assert [row["message_text"] for row in rows] == [
-        "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger.",
         "Voici la ressource demandée : https://example.com/proxy",
+        "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger.",
     ]
-    assert [row["meta_response_id"] for row in rows] == ["reply-id", "message-id"]
+    assert [row["meta_response_id"] for row in rows] == ["message-id", "reply-id"]
 
 
 @pytest.mark.asyncio
@@ -711,3 +711,80 @@ async def test_meta_retry_during_in_flight_run_is_a_duplicate(tmp_path):
 
     assert result == [ProcessingResult(comment_id="post-1_comment-1", status="duplicate")]
     assert graph.calls == []
+
+
+class FacebookPrivateReplyFailsGraphClient(FakeGraphClient):
+    async def private_reply_to_facebook_comment(self, page_id: str, comment_id: str, text: str):
+        self.calls.append(("facebook_private_reply", page_id, comment_id, text))
+        raise GraphAPIError("Meta Graph API error 551: This person isn't available right now.", code=551)
+
+
+@pytest.mark.asyncio
+async def test_facebook_public_confirmation_is_not_posted_when_dm_fails(tmp_path):
+    store = ProcessedCommentStore(tmp_path / "processed.sqlite3")
+    graph = FacebookPrivateReplyFailsGraphClient()
+    processor = CommentProcessor(graph_client=graph, store=store, page_id="page-1", resource_url="https://example.com/proxy")
+
+    result = await processor.process_events([CommentEvent(platform="facebook", comment_id="comment-1", text="Proxy")])
+
+    assert result == [ProcessingResult(comment_id="comment-1", status="private_reply_blocked")]
+    public_replies = [call[2] for call in graph.calls if call[0] == "facebook_public_reply"]
+    # Only the "write to me first" fallback, never the "c'est envoyé" confirmation.
+    assert public_replies == ["Meta ne me laisse pas t’écrire en premier 😅\nEnvoie-moi un petit message et je t’envoie le lien."]
+    assert store.comment_status("facebook", "comment-1") == "private_reply_blocked"
+
+
+class FacebookRateLimitedDmGraphClient(FakeGraphClient):
+    async def private_reply_to_facebook_comment(self, page_id: str, comment_id: str, text: str):
+        self.calls.append(("facebook_private_reply", page_id, comment_id, text))
+        raise GraphAPIError("Meta Graph API error 613: Calls to this api have exceeded the rate limit.", code=613)
+
+
+@pytest.mark.asyncio
+async def test_facebook_rate_limited_dm_stays_retryable_and_silent(tmp_path):
+    store = ProcessedCommentStore(tmp_path / "processed.sqlite3")
+    graph = FacebookRateLimitedDmGraphClient()
+    processor = CommentProcessor(graph_client=graph, store=store, page_id="page-1", resource_url="https://example.com/proxy")
+
+    result = await processor.process_events([CommentEvent(platform="facebook", comment_id="comment-1", text="Proxy")])
+
+    assert result == [ProcessingResult(comment_id="comment-1", status="failed_graph_api")]
+    assert "facebook_public_reply" not in [call[0] for call in graph.calls]
+
+
+class FacebookPrivateReplyWithPsidGraphClient(FakeGraphClient):
+    async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str, quick_replies=None):
+        self.calls.append(("private_reply", page_id, comment_id, text, quick_replies))
+        return {"recipient_id": "psid-42", "message_id": "m-1"}
+
+
+@pytest.mark.asyncio
+async def test_facebook_follow_gate_is_keyed_on_returned_psid(tmp_path):
+    database = tmp_path / "processed.sqlite3"
+    rule_store = CampaignRuleStore(database)
+    rule_store.upsert_rule(
+        CampaignRule(
+            source_task_id="blog",
+            name="Blog",
+            platform="facebook",
+            media_id=None,
+            keywords=["blog"],
+            public_reply_text="Je t’envoie les étapes en privé",
+            dm_text="Voici le lien final",
+            enabled=True,
+            delivery_mode="follow_gate",
+        )
+    )
+    gate_store = FollowGateStore(database)
+    processor = CommentProcessor(
+        graph_client=FacebookPrivateReplyWithPsidGraphClient(),
+        store=ProcessedCommentStore(database),
+        rule_store=rule_store,
+        follow_gate_store=gate_store,
+        page_id="page-1",
+    )
+
+    # Feed webhooks often omit `from`: no author_id on the event.
+    await processor.process_events([CommentEvent(platform="facebook", comment_id="post-1_comment-1", text="Blog")])
+
+    assert gate_store.pending_for_sender("facebook", "psid-42") is not None
