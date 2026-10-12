@@ -36,3 +36,4 @@ deploy/camofox-data/
 .hermes/
 deploy/data/tmp/
 deploy/data/tiktok-backoffice/
+.claude/settings.local.json
