@@ -1,3 +1,4 @@
+import json
 import logging
 from dataclasses import replace
 
@@ -175,14 +176,43 @@ def create_app() -> FastAPI:
             request.headers.get("X-Hub-Signature"),
         ]
         if not any(verify_meta_signature(raw_body, sig, settings.meta_app_secret) for sig in signatures if sig):
+            import hashlib
+            import hmac
             import logging
 
+            expected256 = hmac.new(settings.meta_app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
+            expected1 = hmac.new(settings.meta_app_secret.encode(), raw_body, hashlib.sha1).hexdigest()
+            got256 = (signatures[0] or "").removeprefix("sha256=")
+            got1 = (signatures[1] or "").removeprefix("sha1=")
+            obj = "unknown"
+            has_messaging = None
+            structure = ""
+            try:
+                peek = json.loads(raw_body[:200000])
+                obj = peek.get("object", "unknown")
+                entries = peek.get("entry") or []
+                has_messaging = any("messaging" in e for e in entries) if entries else False
+                if isinstance(entries, list) and entries:
+                    e0 = entries[0] if isinstance(entries[0], dict) else {}
+                    structure = "entry_keys=" + ",".join(sorted(e0.keys()))
+                    msgs = e0.get("messaging")
+                    if isinstance(msgs, list) and msgs and isinstance(msgs[0], dict):
+                        structure += ";msg0_keys=" + ",".join(sorted(msgs[0].keys()))
+                    else:
+                        structure += ";msg0=" + repr(msgs)[:40]
+            except Exception as exc:
+                structure = f"parse_error={type(exc).__name__}:{exc}"
             logging.getLogger("meta_webhook").warning(
-                "signature_rejected sha256_header_present=%s legacy_header_present=%s sig_lens=%s secret_len=%s",
-                bool(signatures[0]),
-                bool(signatures[1]),
+                "signature_rejected object=%s has_messaging=%s sha256_matches=%s sha1_matches=%s sig_lens=%s ctype=%s cenc=%s body_len=%s %s",
+                obj,
+                has_messaging,
+                hmac.compare_digest(expected256, got256),
+                hmac.compare_digest(expected1, got1),
                 [len(sig) for sig in signatures if sig],
-                len(settings.meta_app_secret),
+                request.headers.get("Content-Type"),
+                request.headers.get("Content-Encoding"),
+                len(raw_body),
+                structure,
             )
             raise HTTPException(status_code=403, detail="Invalid Meta signature")
 

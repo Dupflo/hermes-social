@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from app.sqlite_store import SQLiteStore
 
 
-TERMINAL_STATUSES = {"replied", "manually_replied", "skipped", "ignored", "error"}
+TERMINAL_STATUSES = {"replied", "manually_replied", "skipped", "ignored", "error", "blocked"}
 
 
 @dataclass(frozen=True)
@@ -51,8 +51,18 @@ class CommentReviewStore(SQLiteStore):
                     suggested_reply = excluded.suggested_reply,
                     comment_permalink = excluded.comment_permalink,
                     parent_id = excluded.parent_id,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE comment_review_items.status NOT IN ('replied', 'manually_replied', 'skipped', 'ignored', 'error')
+                    updated_at = CASE
+                        WHEN COALESCE(comment_review_items.media_id,'') != COALESCE(excluded.media_id,'')
+                          OR COALESCE(comment_review_items.username,'') != COALESCE(excluded.username,'')
+                          OR COALESCE(comment_review_items.text,'') != COALESCE(excluded.text,'')
+                          OR COALESCE(comment_review_items.media_permalink,'') != COALESCE(excluded.media_permalink,'')
+                          OR COALESCE(comment_review_items.media_caption,'') != COALESCE(excluded.media_caption,'')
+                          OR COALESCE(comment_review_items.reason,'') != COALESCE(excluded.reason,'')
+                          OR COALESCE(comment_review_items.suggested_reply,'') != COALESCE(excluded.suggested_reply,'')
+                          OR COALESCE(comment_review_items.comment_permalink,'') != COALESCE(excluded.comment_permalink,'')
+                          OR COALESCE(comment_review_items.parent_id,'') != COALESCE(excluded.parent_id,'')
+                        THEN CURRENT_TIMESTAMP ELSE comment_review_items.updated_at END
+                WHERE comment_review_items.status NOT IN ('replied', 'manually_replied', 'skipped', 'ignored', 'error', 'blocked')
                 """,
                 (
                     item.platform,

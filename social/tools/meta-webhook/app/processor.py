@@ -56,6 +56,7 @@ FACEBOOK_DM_INVITATION_CONFIRMATION_TEXT = (
     "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."
 )
 DEFAULT_DM_CONFIRMATION_TEXT = "C'est envoyé ! Check tes messages privés !"
+FOLLOW_GATE_PUBLIC_REPLY_TEXT = "Je t’ai envoyé les instructions en privé. Réponds « ✅ J’ai suivi » dans le message privé et je t’envoie le lien."
 
 
 def select_public_reply_variant(base_text: str, comment_id: str) -> str:
@@ -143,7 +144,11 @@ class CommentProcessor:
             )
 
         keyword = rule.keywords[0]
-        public_reply_text = public_reply_for_platform(event.platform, rule.public_reply_text, event.comment_id)
+        public_reply_text = (
+            FOLLOW_GATE_PUBLIC_REPLY_TEXT
+            if rule.delivery_mode == "follow_gate"
+            else public_reply_for_platform(event.platform, rule.public_reply_text, event.comment_id)
+        )
         dm_text = rule.dm_text.strip()
         if not dm_text:
             return ProcessingResult(comment_id=event.comment_id, status="ignored")
@@ -181,6 +186,74 @@ class CommentProcessor:
                 can_send_private_reply = already_dm_sent or await self.graph_client.can_reply_privately_to_facebook_comment(
                     event.comment_id
                 )
+                if rule.delivery_mode == "follow_gate" and self.follow_gate_store is not None:
+                    if not can_send_private_reply:
+                        if not already_public_replied:
+                            result = await self.graph_client.reply_to_facebook_comment(
+                                graph_comment_id,
+                                FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                            )
+                            self._record_outbound(
+                                platform=event.platform,
+                                source_id=event.comment_id,
+                                recipient_id=graph_comment_id,
+                                message_type="public_reply",
+                                message_text=FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT,
+                                result=result,
+                            )
+                            public_reply_sent = True
+                        self.store.mark_private_reply_blocked(
+                            platform=event.platform,
+                            comment_id=event.comment_id,
+                            keyword=keyword,
+                            like_sent=like_sent,
+                            public_reply_sent=public_reply_sent,
+                        )
+                        return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
+                    if not already_dm_sent:
+                        prompt_text = follow_gate_prompt_text()
+                        result = await self.graph_client.private_reply_to_instagram_comment(
+                            page_id=self.page_id,
+                            comment_id=event.comment_id,
+                            text=prompt_text,
+                            quick_replies=follow_gate_quick_replies(),
+                        )
+                        self._record_outbound(
+                            platform=event.platform,
+                            source_id=event.comment_id,
+                            recipient_id=event.author_id or event.comment_id,
+                            message_type="follow_gate_prompt",
+                            message_text=prompt_text,
+                            result=result,
+                        )
+                        self.follow_gate_store.create_pending(
+                            platform=event.platform,
+                            comment_id=event.comment_id,
+                            sender_id=event.author_id or event.comment_id,
+                            campaign=rule.source_task_id,
+                            keyword=keyword,
+                            dm_text=dm_text,
+                        )
+                        dm_sent = False
+                    if not already_public_replied:
+                        result = await self.graph_client.reply_to_facebook_comment(graph_comment_id, public_reply_text)
+                        self._record_outbound(
+                            platform=event.platform,
+                            source_id=event.comment_id,
+                            recipient_id=graph_comment_id,
+                            message_type="public_reply",
+                            message_text=public_reply_text,
+                            result=result,
+                        )
+                        public_reply_sent = True
+                    self.store.mark_follow_gate_pending(
+                        platform=event.platform,
+                        comment_id=event.comment_id,
+                        keyword=keyword,
+                        like_sent=like_sent,
+                        public_reply_sent=public_reply_sent,
+                    )
+                    return ProcessingResult(comment_id=event.comment_id, status="follow_gate_pending")
                 if not already_public_replied:
                     reply_text = public_reply_text if can_send_private_reply else FACEBOOK_PRIVATE_REPLY_FALLBACK_TEXT
                     result = await self.graph_client.reply_to_facebook_comment(graph_comment_id, reply_text)
@@ -231,6 +304,20 @@ class CommentProcessor:
                     )
             else:
                 if not already_dm_sent:
+                    if rule.delivery_mode == "follow_gate":
+                        # TEMP SAFETY: Instagram messaging webhooks are currently
+                        # rejected with invalid signatures, so we cannot reliably
+                        # observe the user replying "J'ai suivi". Do not send a
+                        # follow-gate prompt that promises an automatic unlock.
+                        self.store.mark_private_reply_blocked(
+                            platform=event.platform,
+                            comment_id=event.comment_id,
+                            keyword=keyword,
+                            like_sent=like_sent,
+                            public_reply_sent=public_reply_sent,
+                            error_message="instagram follow_gate disabled: messaging webhook signature mismatch",
+                        )
+                        return ProcessingResult(comment_id=event.comment_id, status="instagram_follow_gate_disabled")
                     if rule.delivery_mode == "follow_gate" and self.follow_gate_store is not None and event.author_id:
                         prompt_text = follow_gate_prompt_text()
                         try:
@@ -430,18 +517,19 @@ class PrivateMessageProcessor:
         return results
 
     async def _process_event(self, event: PrivateMessageEvent) -> PrivateMessageProcessingResult:
-        if event.platform != "instagram_dm" or not event.sender_id:
+        if event.platform not in {"instagram_dm", "facebook_dm"} or not event.sender_id:
             return PrivateMessageProcessingResult(event.message_id, "ignored")
         if not is_follow_gate_confirmation(event.payload or event.text):
             return PrivateMessageProcessingResult(event.message_id, "ignored")
-        gate = self.follow_gate_store.pending_for_sender("instagram", event.sender_id)
+        gate_platform = "facebook" if event.platform == "facebook_dm" else "instagram"
+        gate = self.follow_gate_store.pending_for_sender(gate_platform, event.sender_id)
         if gate is None:
             return PrivateMessageProcessingResult(event.message_id, "no_pending_follow_gate")
         try:
-            # Without Advanced Access to instagram_manage_messages, Meta rejects a normal
-            # DM to the IGSID even after the user taps the quick reply. A second
-            # private reply scoped to the original comment is still allowed inside
-            # the comment private-reply window, so use recipient.comment_id here.
+            # Without Advanced Access to platform messaging, Meta may reject a normal
+            # DM to the user ID. A second private reply scoped to the original
+            # comment is still allowed inside the comment private-reply window, so
+            # use recipient.comment_id here for both Instagram and Facebook gates.
             result = await self.graph_client.private_reply_to_instagram_comment(
                 self.page_id or event.recipient_id or "me",
                 gate.comment_id,
@@ -452,7 +540,7 @@ class PrivateMessageProcessor:
             return PrivateMessageProcessingResult(event.message_id, f"failed_graph_api:{error}")
         if self.outbound_store is not None:
             self.outbound_store.record_sent(
-                platform="instagram",
+                platform=gate_platform,
                 source_type="follow_gate",
                 source_id=gate.comment_id,
                 recipient_id=event.sender_id,
@@ -460,10 +548,10 @@ class PrivateMessageProcessor:
                 message_text=gate.dm_text,
                 meta_response_id=str(result.get("message_id") or result.get("id") or "") or None,
             )
-        self.follow_gate_store.mark_unlocked("instagram", gate.comment_id)
-        state = self.processed_store.delivery_state("instagram", gate.comment_id) or {}
+        self.follow_gate_store.mark_unlocked(gate_platform, gate.comment_id)
+        state = self.processed_store.delivery_state(gate_platform, gate.comment_id) or {}
         self.processed_store.mark_processed(
-            platform="instagram",
+            platform=gate_platform,
             comment_id=gate.comment_id,
             keyword=gate.keyword,
             like_sent=bool(state.get("like_sent")),

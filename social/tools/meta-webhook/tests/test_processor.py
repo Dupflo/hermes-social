@@ -177,6 +177,63 @@ async def test_processor_continues_facebook_flow_when_like_fails(tmp_path):
     ]
 
 
+
+@pytest.mark.asyncio
+async def test_processor_follow_gate_facebook_sends_prompt_not_link(tmp_path):
+    database = tmp_path / "processed.sqlite3"
+    store = ProcessedCommentStore(database)
+    rule_store = CampaignRuleStore(database)
+    follow_gate_store = FollowGateStore(database)
+    rule_store.upsert_rule(
+        CampaignRule(
+            source_task_id="herdr",
+            name="HERDR",
+            platform="any",
+            media_id="fb-media-1",
+            keywords=["herdr"],
+            public_reply_text="C'est envoyé ! Check tes messages privés !",
+            dm_text="Voici le site : https://herdr.dev/",
+            enabled=True,
+            delivery_mode="follow_gate",
+        )
+    )
+    graph = FakeGraphClient()
+    processor = CommentProcessor(
+        graph_client=graph,
+        store=store,
+        rule_store=rule_store,
+        follow_gate_store=follow_gate_store,
+        page_id="page-1",
+    )
+    event = CommentEvent(
+        platform="facebook",
+        comment_id="post-1_comment-1",
+        text="HERDR",
+        media_id="fb-media-1",
+        author_id="user-1",
+        username="alice",
+    )
+
+    result = await processor.process_events([event])
+
+    assert result == [ProcessingResult(comment_id="post-1_comment-1", status="follow_gate_pending")]
+    assert graph.calls == [
+        ("like", "comment-1"),
+        ("facebook_can_reply_privately", "post-1_comment-1"),
+        ("private_reply", "page-1", "post-1_comment-1", graph.calls[2][3], graph.calls[2][4]),
+        ("facebook_public_reply", "comment-1", "Je t’ai envoyé les instructions en privé. Réponds « ✅ J’ai suivi » dans le message privé et je t’envoie le lien."),
+    ]
+    assert "https://herdr.dev/" not in graph.calls[2][3]
+    gate = follow_gate_store.pending_for_sender("facebook", "user-1")
+    assert gate is not None
+    assert gate.dm_text == "Voici le site : https://herdr.dev/"
+    assert store.delivery_state("facebook", "post-1_comment-1") == {
+        "status": "follow_gate_pending",
+        "like_sent": True,
+        "public_reply_sent": True,
+        "dm_sent": False,
+    }
+
 @pytest.mark.asyncio
 async def test_processor_uses_default_public_reply_when_config_is_blank(tmp_path):
     store = ProcessedCommentStore(tmp_path / "processed.sqlite3")
@@ -505,41 +562,14 @@ async def test_follow_gate_prompts_first_then_unlocks_on_instagram_confirmation(
 
     result = await processor.process_events([event])
 
-    assert result == [ProcessingResult(comment_id="comment-1", status="follow_gate_pending")]
-    assert graph.calls[0][0:3] == ("private_reply", "page-1", "comment-1")
-    assert graph.calls[0][4] == [{"content_type": "text", "title": "✅ J’ai suivi", "payload": "FOLLOW_GATE_CONFIRMED"}]
-    assert graph.calls[1] == ("public_reply", "comment-1", "Je t’envoie les étapes en privé")
+    assert result == [ProcessingResult(comment_id="comment-1", status="instagram_follow_gate_disabled")]
+    assert graph.calls == []
+    assert gate_store.pending_for_sender("instagram", "igsid-1") is None
     assert store.delivery_state("instagram", "comment-1") == {
-        "status": "follow_gate_pending",
+        "status": "private_reply_blocked",
         "like_sent": False,
-        "public_reply_sent": True,
+        "public_reply_sent": False,
         "dm_sent": False,
-    }
-
-    private_processor = PrivateMessageProcessor(
-        graph_client=graph,
-        follow_gate_store=gate_store,
-        processed_store=store,
-        outbound_store=outbound_store,
-    )
-    dm_event = PrivateMessageEvent(
-        platform="instagram_dm",
-        message_id="mid-1",
-        text="✅ J’ai suivi",
-        sender_id="igsid-1",
-        recipient_id="page-1",
-        payload=FOLLOW_GATE_CONFIRMATION_PAYLOAD,
-    )
-
-    unlocked = await private_processor.process_events([dm_event])
-
-    assert unlocked[0].status == "follow_gate_unlocked"
-    assert graph.calls[-1] == ("private_reply", "page-1", "comment-1", "Voici le lien final", None)
-    assert store.delivery_state("instagram", "comment-1") == {
-        "status": "processed",
-        "like_sent": False,
-        "public_reply_sent": True,
-        "dm_sent": True,
     }
 
 
