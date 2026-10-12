@@ -54,15 +54,49 @@ def update_env_lines(lines: list[str], updates: dict[str, str]) -> list[str]:
     return updated_lines
 
 
+def _owner_of(path: Path) -> tuple[int, int] | None:
+    """uid/gid of an existing file, None when it does not exist."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return st.st_uid, st.st_gid
+
+
+def _write_private(path: Path, data: str, owner: tuple[int, int] | None) -> None:
+    """Write `data` to `path` in 0600 from the very first byte, owned by `owner`.
+
+    `os.open(..., 0o600)` only applies to a new file, hence the `fchmod` for a
+    pre-existing one (e.g. an old `.bak` left in 0644). The owner of the
+    original `.env` is kept when the process runs as another user (root exec).
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        os.write(fd, data.encode("utf-8"))
+        os.fsync(fd)
+        if owner is not None:
+            current = os.fstat(fd)
+            if (current.st_uid, current.st_gid) != owner:
+                os.fchown(fd, owner[0], owner[1])
+    finally:
+        os.close(fd)
+
+
 def write_env_file(path: str | Path, lines: list[str]) -> None:
     env_path = Path(path)
     backup_path = env_path.with_suffix(env_path.suffix + ".bak")
     tmp_path = env_path.with_suffix(env_path.suffix + ".tmp")
+    owner = _owner_of(env_path)
 
     if env_path.exists():
-        backup_path.write_text(env_path.read_text(encoding="utf-8"), encoding="utf-8")
+        _write_private(backup_path, env_path.read_text(encoding="utf-8"), owner)
 
-    tmp_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        _write_private(tmp_path, "\n".join(lines) + "\n", owner)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     os.replace(tmp_path, env_path)
     env_path.chmod(0o600)
 
@@ -137,7 +171,15 @@ def fetch_page_access_token(
     raise TokenRenewalError("Configured META_PAGE_ID was not found in /me/accounts")
 
 
-def renew_tokens(env_path: str | Path = ".env", deploy_trigger_path: str | Path | None = None) -> str:
+def renew_tokens(
+    env_path: str | Path = ".env",
+    deploy_trigger_path: str | Path | None | bool = None,
+) -> str:
+    """Renew the tokens and rewrite the .env.
+
+    `deploy_trigger_path=False` disables the trigger entirely (neither the
+    argument nor the `META_TOKEN_RENEWAL_DEPLOY_TRIGGER` key of the .env).
+    """
     env_file = read_env_file(env_path)
     values = env_file.values
     graph_api_version = values.get("GRAPH_API_VERSION") or values.get("META_GRAPH_API_VERSION") or "v21.0"
@@ -171,14 +213,17 @@ def renew_tokens(env_path: str | Path = ".env", deploy_trigger_path: str | Path 
     )
     write_env_file(env_path, new_lines)
 
-    trigger = deploy_trigger_path or values.get("META_TOKEN_RENEWAL_DEPLOY_TRIGGER")
+    if deploy_trigger_path is False:
+        trigger = None
+    else:
+        trigger = deploy_trigger_path or values.get("META_TOKEN_RENEWAL_DEPLOY_TRIGGER")
     if trigger:
         Path(trigger).touch()
 
     return "Meta tokens renewed and .env updated"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Renew Meta long-lived user token and Page token.")
     parser.add_argument("--env-file", default=".env", help="Path to the .env file to update")
     parser.add_argument(
@@ -186,12 +231,22 @@ def main() -> int:
         default=None,
         help="Optional file to touch after updating .env, for deployment/restart automation",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--no-deploy-trigger",
+        action="store_true",
+        help="Never touch a deploy trigger (neither --deploy-trigger nor META_TOKEN_RENEWAL_DEPLOY_TRIGGER)",
+    )
+    args = parser.parse_args(argv)
 
+    trigger: str | None | bool = False if args.no_deploy_trigger else args.deploy_trigger
     try:
-        message = renew_tokens(args.env_file, args.deploy_trigger)
+        message = renew_tokens(args.env_file, trigger)
     except TokenRenewalError as exc:
         print(f"Meta token renewal failed: {exc}")
+        return 1
+    except httpx.HTTPError as exc:
+        # No traceback: an httpx trace may carry the URL and its query (tokens).
+        print(f"Meta token renewal failed: network error ({type(exc).__name__})")
         return 1
 
     print(message)
