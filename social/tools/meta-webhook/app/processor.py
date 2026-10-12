@@ -96,6 +96,7 @@ class CommentProcessor:
         public_reply_text: str = "C'est envoyé, check tes DM",
         owner_ids: set[str] | None = None,
         owner_usernames: set[str] | None = None,
+        instagram_messaging_enabled: bool = False,
     ) -> None:
         self.graph_client = graph_client
         self.store = store
@@ -108,6 +109,9 @@ class CommentProcessor:
         self.public_reply_text = public_reply_text
         self.owner_ids = owner_ids or set()
         self.owner_usernames = owner_usernames or set()
+        # The Instagram follow-gate unlock relies on receiving the user's DM reply,
+        # which only verifies once the Instagram app secret is configured.
+        self.instagram_messaging_enabled = instagram_messaging_enabled
 
     async def process_events(self, events: list[CommentEvent]) -> list[ProcessingResult]:
         results = []
@@ -153,13 +157,13 @@ class CommentProcessor:
         if not dm_text:
             return ProcessingResult(comment_id=event.comment_id, status="ignored")
 
+        if not self.store.try_claim(event.platform, event.comment_id, keyword):
+            return ProcessingResult(comment_id=event.comment_id, status="duplicate")
+
         existing_state = self.store.delivery_state(event.platform, event.comment_id)
         already_liked = bool(existing_state and existing_state["like_sent"])
         already_public_replied = bool(existing_state and existing_state["public_reply_sent"])
         already_dm_sent = bool(existing_state and existing_state["dm_sent"])
-
-        if not self.store.try_claim(event.platform, event.comment_id, keyword):
-            return ProcessingResult(comment_id=event.comment_id, status="duplicate")
 
         like_sent = already_liked
         public_reply_sent = already_public_replied
@@ -304,18 +308,18 @@ class CommentProcessor:
                     )
             else:
                 if not already_dm_sent:
-                    if rule.delivery_mode == "follow_gate":
-                        # TEMP SAFETY: Instagram messaging webhooks are currently
-                        # rejected with invalid signatures, so we cannot reliably
-                        # observe the user replying "J'ai suivi". Do not send a
-                        # follow-gate prompt that promises an automatic unlock.
+                    if rule.delivery_mode == "follow_gate" and not self.instagram_messaging_enabled:
+                        # Without the Instagram app secret, Instagram messaging
+                        # webhooks fail signature checks, so we cannot observe the
+                        # user replying "J'ai suivi". Do not send a follow-gate
+                        # prompt that promises an automatic unlock.
                         self.store.mark_private_reply_blocked(
                             platform=event.platform,
                             comment_id=event.comment_id,
                             keyword=keyword,
                             like_sent=like_sent,
                             public_reply_sent=public_reply_sent,
-                            error_message="instagram follow_gate disabled: messaging webhook signature mismatch",
+                            error_message="instagram follow_gate disabled: INSTAGRAM_APP_SECRET not configured",
                         )
                         return ProcessingResult(comment_id=event.comment_id, status="instagram_follow_gate_disabled")
                     if rule.delivery_mode == "follow_gate" and self.follow_gate_store is not None and event.author_id:
@@ -344,7 +348,9 @@ class CommentProcessor:
                                 dm_text=dm_text,
                             )
                             return_status = "follow_gate_pending"
-                        except GraphAPIError:
+                        except GraphAPIError as error:
+                            if not error.blocks_private_reply:
+                                raise
                             if not already_public_replied:
                                 result = await self.graph_client.reply_to_instagram_comment(
                                     graph_comment_id,
@@ -365,6 +371,7 @@ class CommentProcessor:
                                 keyword=keyword,
                                 like_sent=like_sent,
                                 public_reply_sent=public_reply_sent,
+                                error_message=str(error),
                             )
                             return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
                     else:
@@ -391,7 +398,9 @@ class CommentProcessor:
                                 public_reply_sent=public_reply_sent,
                                 dm_sent=dm_sent,
                             )
-                        except GraphAPIError:
+                        except GraphAPIError as error:
+                            if not error.blocks_private_reply:
+                                raise
                             if not already_public_replied:
                                 result = await self.graph_client.reply_to_instagram_comment(
                                     graph_comment_id,
@@ -412,6 +421,7 @@ class CommentProcessor:
                                 keyword=keyword,
                                 like_sent=like_sent,
                                 public_reply_sent=public_reply_sent,
+                                error_message=str(error),
                             )
                             return ProcessingResult(comment_id=event.comment_id, status="private_reply_blocked")
                 if not already_public_replied:
@@ -451,6 +461,15 @@ class CommentProcessor:
                 error_message=str(error),
             )
             return ProcessingResult(comment_id=event.comment_id, status="failed_graph_api")
+        except Exception as error:
+            logger.exception("Unexpected error processing comment_id=%s", event.comment_id)
+            self.store.mark_failed(
+                platform=event.platform,
+                comment_id=event.comment_id,
+                keyword=keyword,
+                error_message=f"{type(error).__name__}: {error}"[:500],
+            )
+            return ProcessingResult(comment_id=event.comment_id, status="failed_unexpected")
 
         self.store.mark_processed(
             platform=event.platform,

@@ -5,6 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     meta_app_id: str = ""
     meta_app_secret: str = ""
+    # Instagram App Secret (App Dashboard > Instagram > API setup with Instagram login).
+    # Signs the `instagram` webhooks when that product is used; distinct from meta_app_secret.
+    instagram_app_secret: str = ""
     meta_verify_token: str = ""
     meta_page_access_token: str = ""
     meta_page_id: str = ""
@@ -25,3 +28,7 @@ class Settings(BaseSettings):
 
 def get_settings() -> Settings:
     return Settings()
+
+
+def webhook_secrets(settings: Settings) -> list[str]:
+    return [secret for secret in (settings.meta_app_secret, settings.instagram_app_secret) if secret]

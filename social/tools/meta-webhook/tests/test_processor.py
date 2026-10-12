@@ -12,6 +12,17 @@ from app.webhook_parser import CommentEvent
 from app.webhook_parser import PrivateMessageEvent
 
 
+def age_processed_rows(database, minutes=10):
+    """Simulate a checkpoint left by a run that finished long ago."""
+    import sqlite3
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE processed_comments SET processed_at = datetime('now', ?)",
+            (f"-{minutes} minutes",),
+        )
+
+
 class FakeGraphClient:
     def __init__(self):
         self.calls = []
@@ -66,7 +77,7 @@ class FacebookPrivateReplyBlockedGraphClient(FakeGraphClient):
 class InstagramPrivateReplyBlockedGraphClient(FakeGraphClient):
     async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str, quick_replies=None):
         self.calls.append(("private_reply", page_id, comment_id, text, quick_replies))
-        raise GraphAPIError("Meta Graph API error 10901: Activity replying time expired")
+        raise GraphAPIError("Meta Graph API error 10901: Activity replying time expired", code=10901)
 
 
 @pytest.mark.asyncio
@@ -400,6 +411,7 @@ async def test_processor_retries_missing_public_reply_without_duplicate_dm(tmp_p
         public_reply_sent=False,
         dm_sent=True,
     )
+    age_processed_rows(tmp_path / "processed.sqlite3")
     graph = FakeGraphClient()
     processor = CommentProcessor(
         graph_client=graph,
@@ -586,4 +598,116 @@ async def test_follow_gate_confirmation_without_pending_gate_is_not_handled(tmp_
     result = await processor.process_events([PrivateMessageEvent("instagram_dm", "mid-1", "j'ai suivi", "igsid-1")])
 
     assert result[0].status == "no_pending_follow_gate"
+    assert graph.calls == []
+
+
+def _instagram_follow_gate_setup(tmp_path, *, instagram_messaging_enabled):
+    database = tmp_path / "processed.sqlite3"
+    rule_store = CampaignRuleStore(database)
+    rule_store.upsert_rule(
+        CampaignRule(
+            source_task_id="blog",
+            name="Blog",
+            platform="instagram",
+            media_id="media-1",
+            keywords=["blog"],
+            public_reply_text="Je t’envoie les étapes en privé",
+            dm_text="Voici le lien final",
+            enabled=True,
+            delivery_mode="follow_gate",
+        )
+    )
+    graph = FakeGraphClient()
+    gate_store = FollowGateStore(database)
+    processor = CommentProcessor(
+        graph_client=graph,
+        store=ProcessedCommentStore(database),
+        outbound_store=OutboundMessageStore(database),
+        rule_store=rule_store,
+        follow_gate_store=gate_store,
+        page_id="page-1",
+        instagram_messaging_enabled=instagram_messaging_enabled,
+    )
+    event = CommentEvent(
+        platform="instagram",
+        comment_id="comment-1",
+        text="Blog",
+        media_id="media-1",
+        author_id="igsid-1",
+        username="alice",
+    )
+    return processor, graph, gate_store, event
+
+
+@pytest.mark.asyncio
+async def test_instagram_follow_gate_sends_prompt_once_instagram_secret_is_configured(tmp_path):
+    processor, graph, gate_store, event = _instagram_follow_gate_setup(tmp_path, instagram_messaging_enabled=True)
+
+    result = await processor.process_events([event])
+
+    assert result == [ProcessingResult(comment_id="comment-1", status="follow_gate_pending")]
+    assert graph.calls[0][0] == "private_reply"
+    assert gate_store.pending_for_sender("instagram", "igsid-1") is not None
+
+
+class InstagramRateLimitedGraphClient(FakeGraphClient):
+    async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str, quick_replies=None):
+        self.calls.append(("private_reply", page_id, comment_id, text, quick_replies))
+        raise GraphAPIError("Meta Graph API error 4: Application request limit reached", code=4)
+
+
+@pytest.mark.asyncio
+async def test_instagram_transient_private_reply_error_is_retryable_not_blocked(tmp_path):
+    store = ProcessedCommentStore(tmp_path / "processed.sqlite3")
+    graph = InstagramRateLimitedGraphClient()
+    processor = CommentProcessor(graph_client=graph, store=store, page_id="page-1", resource_url="https://example.com/proxy")
+    event = CommentEvent(platform="instagram", comment_id="comment-1", text="Proxy")
+
+    result = await processor.process_events([event])
+
+    assert result == [ProcessingResult(comment_id="comment-1", status="failed_graph_api")]
+    # No "Meta ne me laisse pas t'écrire" fallback posted publicly for a rate limit.
+    assert [call[0] for call in graph.calls] == ["private_reply"]
+    assert store.comment_status("instagram", "comment-1") == "failed"
+    assert store.try_claim("instagram", "comment-1", "proxy") is True
+
+
+class NetworkDownGraphClient(FakeGraphClient):
+    async def private_reply_to_instagram_comment(self, page_id: str, comment_id: str, text: str, quick_replies=None):
+        raise ConnectionError("graph.facebook.com unreachable")
+
+
+@pytest.mark.asyncio
+async def test_unexpected_error_releases_claim_instead_of_leaving_it_stuck(tmp_path):
+    store = ProcessedCommentStore(tmp_path / "processed.sqlite3")
+    processor = CommentProcessor(
+        graph_client=NetworkDownGraphClient(), store=store, page_id="page-1", resource_url="https://example.com/proxy"
+    )
+    event = CommentEvent(platform="instagram", comment_id="comment-1", text="Proxy")
+
+    result = await processor.process_events([event])
+
+    assert result == [ProcessingResult(comment_id="comment-1", status="failed_unexpected")]
+    assert store.comment_status("instagram", "comment-1") == "failed"
+    assert store.try_claim("instagram", "comment-1", "proxy") is True
+
+
+@pytest.mark.asyncio
+async def test_meta_retry_during_in_flight_run_is_a_duplicate(tmp_path):
+    store = ProcessedCommentStore(tmp_path / "processed.sqlite3")
+    # First run checkpointed the DM and is still about to post the public reply.
+    store.mark_processed(
+        platform="facebook",
+        comment_id="post-1_comment-1",
+        keyword="proxy",
+        like_sent=True,
+        public_reply_sent=False,
+        dm_sent=True,
+    )
+    graph = FakeGraphClient()
+    processor = CommentProcessor(graph_client=graph, store=store, page_id="page-1", resource_url="https://example.com/proxy")
+
+    result = await processor.process_events([CommentEvent(platform="facebook", comment_id="post-1_comment-1", text="Proxy")])
+
+    assert result == [ProcessingResult(comment_id="post-1_comment-1", status="duplicate")]
     assert graph.calls == []

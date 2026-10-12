@@ -68,7 +68,14 @@ class ProcessedCommentStore(SQLiteStore):
                         AND processed_comments.created_at < datetime('now', '-5 minutes')
                    )
                    OR (
+                        -- mark_processed() also checkpoints mid-flow; only resume an
+                        -- incomplete row once that run is clearly over, otherwise a
+                        -- Meta retry would process the comment twice in parallel.
                         processed_comments.status = 'processed'
+                        AND (
+                            processed_comments.processed_at IS NULL
+                            OR processed_comments.processed_at < datetime('now', '-5 minutes')
+                        )
                         AND (
                             processed_comments.public_reply_sent = 0
                             OR processed_comments.dm_sent = 0

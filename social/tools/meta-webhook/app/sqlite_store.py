@@ -15,7 +15,11 @@ class SQLiteStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(self.database_path)
+        # The webhook and the cron scripts (scan, backfill, kanban) share this file:
+        # WAL lets readers and the writer coexist, the timeout absorbs short locks.
+        connection = sqlite3.connect(self.database_path, timeout=30)
+        connection.execute("PRAGMA journal_mode=WAL")
+        return connection
 
     def _ensure_schema(self) -> None:
         raise NotImplementedError

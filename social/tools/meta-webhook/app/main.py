@@ -7,13 +7,14 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 
 from app.campaign_rules import CampaignRuleStore
 from app.config import get_settings
+from app.config import webhook_secrets
 from app.follow_gate_store import FollowGateStore
 from app.graph_client import GraphClient
 from app.outbound_message_store import OutboundMessageStore
 from app.platform_utils import owner_identity_sets
 from app.processor import CommentProcessor
 from app.processor import PrivateMessageProcessor
-from app.security import verify_meta_signature
+from app.security import verify_meta_signature_any
 from app.store import ProcessedCommentStore
 from app.comment_review_store import CommentReviewStore
 from app.webhook_manual_review import reconcile_manual_review_replies
@@ -175,44 +176,22 @@ def create_app() -> FastAPI:
             request.headers.get("X-Hub-Signature-256"),
             request.headers.get("X-Hub-Signature"),
         ]
-        if not any(verify_meta_signature(raw_body, sig, settings.meta_app_secret) for sig in signatures if sig):
-            import hashlib
-            import hmac
-            import logging
-
-            expected256 = hmac.new(settings.meta_app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
-            expected1 = hmac.new(settings.meta_app_secret.encode(), raw_body, hashlib.sha1).hexdigest()
-            got256 = (signatures[0] or "").removeprefix("sha256=")
-            got1 = (signatures[1] or "").removeprefix("sha1=")
+        secrets = webhook_secrets(settings)
+        if not verify_meta_signature_any(raw_body, signatures, secrets):
             obj = "unknown"
             has_messaging = None
-            structure = ""
             try:
-                peek = json.loads(raw_body[:200000])
+                peek = json.loads(raw_body)
                 obj = peek.get("object", "unknown")
-                entries = peek.get("entry") or []
-                has_messaging = any("messaging" in e for e in entries) if entries else False
-                if isinstance(entries, list) and entries:
-                    e0 = entries[0] if isinstance(entries[0], dict) else {}
-                    structure = "entry_keys=" + ",".join(sorted(e0.keys()))
-                    msgs = e0.get("messaging")
-                    if isinstance(msgs, list) and msgs and isinstance(msgs[0], dict):
-                        structure += ";msg0_keys=" + ",".join(sorted(msgs[0].keys()))
-                    else:
-                        structure += ";msg0=" + repr(msgs)[:40]
-            except Exception as exc:
-                structure = f"parse_error={type(exc).__name__}:{exc}"
-            logging.getLogger("meta_webhook").warning(
-                "signature_rejected object=%s has_messaging=%s sha256_matches=%s sha1_matches=%s sig_lens=%s ctype=%s cenc=%s body_len=%s %s",
+                has_messaging = any("messaging" in e for e in peek.get("entry") or [] if isinstance(e, dict))
+            except Exception:
+                pass
+            logger.warning(
+                "signature_rejected object=%s has_messaging=%s secrets_configured=%s instagram_secret_configured=%s",
                 obj,
                 has_messaging,
-                hmac.compare_digest(expected256, got256),
-                hmac.compare_digest(expected1, got1),
-                [len(sig) for sig in signatures if sig],
-                request.headers.get("Content-Type"),
-                request.headers.get("Content-Encoding"),
-                len(raw_body),
-                structure,
+                len(secrets),
+                bool(settings.instagram_app_secret),
             )
             raise HTTPException(status_code=403, detail="Invalid Meta signature")
 
@@ -289,6 +268,7 @@ def create_app() -> FastAPI:
                 public_reply_text=settings.public_reply_text,
                 owner_ids=owner_ids,
                 owner_usernames=owner_usernames,
+                instagram_messaging_enabled=bool(settings.instagram_app_secret),
             )
             results = await processor.process_events(events)
 

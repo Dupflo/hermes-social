@@ -80,6 +80,10 @@ def test_store_reports_fully_processed_only_when_public_reply_and_dm_are_sent(tm
         "dm_sent": True,
     }
     assert store.is_fully_processed("facebook", "partial-comment") is False
+    # A fresh checkpoint belongs to a run that may still be in flight.
+    assert store.try_claim("facebook", "partial-comment", "proxy") is False
+    with sqlite3.connect(tmp_path / "processed.sqlite3") as connection:
+        connection.execute("UPDATE processed_comments SET processed_at = datetime('now', '-10 minutes')")
     assert store.try_claim("facebook", "partial-comment", "proxy") is True
 
     store.mark_processed(

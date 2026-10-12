@@ -3,8 +3,23 @@ from typing import Any
 import httpx
 
 
+# Codes meaning Meta will never accept a private reply for this comment
+# (permission, user unreachable, already replied, 7-day window expired).
+# Anything else (rate limits, transient 1/2, expired token 190…) is retryable.
+PRIVATE_REPLY_BLOCKING_CODES = {10, 200, 230, 551, 10900, 10901, 10903}
+
+
 class GraphAPIError(RuntimeError):
     """Raised when Meta Graph API returns an error response."""
+
+    def __init__(self, message: str, *, code: int | None = None, subcode: int | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.subcode = subcode
+
+    @property
+    def blocks_private_reply(self) -> bool:
+        return self.code in PRIVATE_REPLY_BLOCKING_CODES
 
 
 class GraphClient:
@@ -107,10 +122,19 @@ class GraphClient:
             request_params.update(params)
 
         response = await self.http_client.request(method, f"{self.base_url}{path}", params=request_params, json=json)
-        data = response.json() if response.content else {}
+        try:
+            data = response.json() if response.content else {}
+        except ValueError:
+            # Meta occasionally answers with an HTML error page.
+            data = {}
         if response.is_error:
             error = data.get("error", {}) if isinstance(data, dict) else {}
-            message = error.get("message") or response.text
+            message = error.get("message") or response.text[:300]
             code = error.get("code")
-            raise GraphAPIError(f"Meta Graph API error {code}: {message}")
+            subcode = error.get("error_subcode")
+            raise GraphAPIError(
+                f"Meta Graph API error {code}" + (f"/{subcode}" if subcode else "") + f": {message}",
+                code=code,
+                subcode=subcode,
+            )
         return data
