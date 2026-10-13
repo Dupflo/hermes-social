@@ -171,6 +171,7 @@ ROUTES = [
     ("POST", "/internal/comments/instagram/111/replay", None),
     ("POST", "/internal/comments/instagram/111/close", {"reason": "window_expired"}),
     ("POST", "/internal/comments/replay-recent", {"cursor": None}),
+    ("POST", "/internal/keywords/match", {"text": "x", "keywords": ["x"]}),
 ]
 
 
@@ -595,3 +596,85 @@ def test_batch_with_nothing_to_do(env, client):
         "remaining": 0,
         "cursor": None,
     }
+
+
+# --- s13: POST /internal/keywords/match (ADR 038 §1) -------------------------------------
+
+
+def match(client, body, headers=AUTH):
+    return client.post("/internal/keywords/match", headers=headers, json=body)
+
+
+def test_keywords_match_returns_first_matching_index(env, client):
+    response = match(client, {"text": "je veux la voicebox", "keywords": ["proxy", "voicebox"]})
+    assert response.status_code == 200
+    assert response.json() == {"matched": True, "index": 1}
+
+
+def test_keywords_match_honours_the_meta_negation(env, client):
+    response = match(client, {"text": "sans voicebox", "keywords": ["voicebox"]})
+    assert response.status_code == 200
+    assert response.json() == {"matched": False, "index": None}
+
+
+def test_keywords_match_several_matches_gives_the_first_index(env, client):
+    response = match(client, {"text": "proxy et voicebox", "keywords": ["autre", "voicebox", "proxy"]})
+    assert response.json() == {"matched": True, "index": 1}
+    assert set(response.json()) == {"matched", "index"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"text": "x", "keywords": []},
+        {"text": "x", "keywords": ["k"] * 101},
+        {"text": "x" * 2001, "keywords": ["x"]},
+        {"text": "", "keywords": ["x"]},
+        {"text": "x", "keywords": [""]},
+        {"text": "x", "keywords": ["k" * 101]},
+        {"text": "x", "keywords": ["x"], "extra": 1},
+        {"keywords": ["x"]},
+    ],
+)
+def test_keywords_match_rejects_invalid_bodies(env, client, body):
+    response = match(client, body)
+    assert response.status_code == 422
+    assert response.json() == {"error": "invalid_request"}
+
+
+def test_keywords_match_touches_neither_graph_nor_the_database(env, client, monkeypatch):
+    # Deterministic (review s13 M1): file mtime/size moved under GC-checkpointed WAL connections
+    # of other tests. We prove "no database" by refusing any SQLite connection during the call,
+    # and "nothing written" by comparing the database content, not its bytes on disk.
+    put(env, "c-1", "failed", "-1 hours")
+    add_rule(env)
+
+    def dump():
+        with sqlite3.connect(env["database"]) as connection:
+            return list(connection.iterdump())
+
+    content_before = dump()
+    opened = []
+    real_connect = sqlite3.connect
+
+    def spy_connect(*args, **kwargs):
+        opened.append(args[0] if args else kwargs.get("database"))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", spy_connect)
+    response = match(client, {"text": "je veux la voicebox", "keywords": ["voicebox"]})
+    monkeypatch.setattr(sqlite3, "connect", real_connect)
+
+    assert response.status_code == 200
+    assert opened == []
+    assert env["graph"].calls == []
+    assert dump() == content_before
+
+
+def test_keywords_match_without_a_database_creates_none(monkeypatch, tmp_path, client):
+    database = tmp_path / "absent" / "processed.sqlite3"
+    monkeypatch.setenv("PROCESSED_COMMENTS_DATABASE", str(database))
+    monkeypatch.setenv("CONSOLE_INTERNAL_TOKEN", TOKEN)
+
+    assert match(client, {"text": "voicebox", "keywords": ["voicebox"]}).status_code == 200
+    assert not database.exists()

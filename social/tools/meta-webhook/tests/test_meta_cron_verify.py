@@ -909,3 +909,37 @@ def test_public_only_path_writes_exactly_what_persist_public_reply_only_wrote(en
     )
 
     assert _snapshot(env.db) == _snapshot(twin.db)
+
+
+# --------------------------------------------------------------------------- s13 (AC 7, m8)
+
+
+def test_s13_console_disabled_rule_is_absent_from_load_rules(tmp_path):
+    db = tmp_path / "db.sqlite3"
+    store = CampaignRuleStore(db)
+    store.upsert_rule(
+        CampaignRule(
+            source_task_id="console-0123456789ab", name="Console", platform="any", media_id=None,
+            keywords=["voicebox"], public_reply_text="R", dm_text="D", enabled=True,
+        )
+    )
+    mcv.configure(db, Settings(_env_file=None, meta_page_access_token=TOKEN))
+
+    def toggle(enabled):
+        with sqlite3.connect(db) as connection:
+            connection.execute(
+                "UPDATE campaign_rules SET enabled = ?, source = 'console', updated_at = CURRENT_TIMESTAMP"
+                " WHERE source_task_id = ?",
+                (int(enabled), "console-0123456789ab"),
+            )
+
+    toggle(True)
+    rules = mcv.load_rules()
+    assert [r["source_task_id"] for r in rules] == ["console-0123456789ab"]
+    rule, keyword = mcv.find_rule(platform="instagram", media_id="m1", text="la voicebox", rules=rules)
+    assert rule is not None and keyword == "voicebox"
+
+    toggle(False)
+    rules = mcv.load_rules()
+    assert rules == []
+    assert mcv.find_rule(platform="instagram", media_id="m1", text="la voicebox", rules=rules) == (None, None)

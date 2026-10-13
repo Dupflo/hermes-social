@@ -26,3 +26,22 @@ def test_list_filters_status(tmp_path):
 
     assert result["ok"] is True
     assert [item["comment_id"] for item in result["items"]] == ["c1"]
+
+
+
+# --- s13: ensure-schema --------------------------------------------------------------------
+
+import sqlite3
+
+
+def test_ensure_schema_prints_campaign_columns_and_no_data(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+
+    result = json.loads(run(["--db", str(db), "ensure-schema"]))
+
+    assert result == {
+        "ok": True,
+        "tiktok_campaigns": ["slug", "name", "reply_template", "active", "created_at", "updated_at", "source", "dm_text"],
+    }
+    with sqlite3.connect(db) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM tiktok_campaigns").fetchone() == (0,)

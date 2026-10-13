@@ -4,6 +4,10 @@ Console ADR 012 (Python stays the source of truth, /internal/* on a second app) 
 (replay contract). Every route requires `Authorization: Bearer <CONSOLE_INTERNAL_TOKEN>`;
 an empty server token refuses everything. Responses carry codes and statuses only: never
 the comment text, an error message, a username or a Graph URL.
+
+s13 (console ADR 038): `POST /internal/keywords/match` previews a campaign's keywords with
+`app.keyword.contains_keyword` (the very matcher of the webhook), so the console never
+reimplements the Meta logic. Pure function: no database, no Graph call, index only.
 """
 
 import base64
@@ -12,17 +16,18 @@ import hmac
 import json
 import logging
 import time
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import Depends, FastAPI, Path, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app import replay
 from app.config import Settings, get_settings
 from app.graph_client import GraphAPIError, GraphClient
+from app.keyword import contains_keyword
 from app.processor import CommentProcessor
 from app.processor_factory import build_comment_processor
 from app.store import ProcessedCommentStore
@@ -94,6 +99,13 @@ class CloseBody(BaseModel):
 
 class ReplayRecentBody(BaseModel):
     cursor: str | None = None
+
+
+class KeywordMatchBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1, max_length=2000)
+    keywords: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(min_length=1, max_length=100)
 
 
 def encode_cursor(sweep_started: str, after: tuple[str, str, str] | None) -> str:
@@ -191,6 +203,12 @@ def create_internal_app() -> FastAPI:
     @app.get("/internal/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/internal/keywords/match")
+    async def keywords_match(body: KeywordMatchBody) -> dict[str, bool | int | None]:
+        # Same semantics as meta_cron_verify.find_rule: first keyword (given order) that matches.
+        index = next((i for i, keyword in enumerate(body.keywords) if contains_keyword(body.text, keyword)), None)
+        return {"matched": index is not None, "index": index}
 
     @app.post("/internal/comments/replay-recent")
     async def replay_recent(body: ReplayRecentBody) -> dict[str, int | str | None]:

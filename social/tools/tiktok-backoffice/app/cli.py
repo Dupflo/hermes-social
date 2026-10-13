@@ -8,7 +8,7 @@ from app.config import Settings
 from app.camofox_reader import fetch_comments_from_camofox
 from app.discovery import discover_profile_videos
 from app.keyword import contains_keyword
-from app.kanban_import import DEFAULT_KANBAN_DB, sync_meta_campaigns_to_tiktok
+from app.kanban_import import DEFAULT_KANBAN_DB, sync_meta_campaigns_to_tiktok_report
 from app.models import Campaign, ReplyDraft, ReviewItemStatus, TikTokComment, TikTokVideo
 from app.store import TikTokBackofficeStore
 
@@ -88,6 +88,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync_kanban.add_argument("--kanban-db", type=Path, default=DEFAULT_KANBAN_DB)
 
     sub.add_parser("list-campaigns")
+
+    # s13: builds the store (runs the additive migrations) and prints the campaign columns only.
+    sub.add_parser("ensure-schema")
 
     campaign = sub.add_parser("campaign-upsert")
     campaign.add_argument("--slug", required=True)
@@ -224,16 +227,28 @@ def run(argv: list[str] | None = None) -> str:
 
 
     if args.command == "sync-kanban-campaigns":
-        synced = sync_meta_campaigns_to_tiktok(store, args.kanban_db)
-        return json.dumps({"ok": True, "synced": synced}, ensure_ascii=False)
+        report = sync_meta_campaigns_to_tiktok_report(store, args.kanban_db)
+        return json.dumps(
+            {
+                "ok": True,
+                "synced": report.created + report.updated,
+                "created": report.created,
+                "updated": report.updated,
+                "skipped_console": report.skipped_console,
+            },
+            ensure_ascii=False,
+        )
+
+    if args.command == "ensure-schema":
+        return json.dumps({"ok": True, "tiktok_campaigns": store.campaign_columns()}, ensure_ascii=False)
 
     if args.command == "list-campaigns":
         return json.dumps({"ok": True, "items": store.list_campaigns()}, ensure_ascii=False)
 
     if args.command == "campaign-upsert":
         keywords = tuple(keyword.strip() for keyword in args.keywords.split(",") if keyword.strip())
-        store.upsert_campaign(Campaign(slug=args.slug, name=args.name, keywords=keywords, reply_template=args.reply))
-        return json.dumps({"ok": True, "slug": args.slug}, ensure_ascii=False)
+        result = store.upsert_campaign(Campaign(slug=args.slug, name=args.name, keywords=keywords, reply_template=args.reply))
+        return json.dumps({"ok": True, "slug": args.slug, "result": result}, ensure_ascii=False)
 
     if args.command == "match":
         result = store.match_campaign(args.campaign)

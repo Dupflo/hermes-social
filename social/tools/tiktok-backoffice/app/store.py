@@ -4,6 +4,7 @@ import hashlib
 import sqlite3
 from pathlib import Path
 import re
+from typing import Literal
 
 from app.keyword import contains_keyword
 from app.models import Campaign, ReplyDraft, ReviewItemStatus, ReviewStatus, TikTokComment, TikTokVideo
@@ -53,7 +54,9 @@ class TikTokBackofficeStore:
         self._ensure_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database)
+        # s13 (console ADR 037): the console may hold a short write lock on this
+        # rollback-journal database; wait for it instead of failing after 5 s.
+        connection = sqlite3.connect(self.database, timeout=30)
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -387,7 +390,13 @@ class TikTokBackofficeStore:
         return cursor.rowcount > 0
 
 
-    def upsert_campaign(self, campaign: Campaign) -> None:
+    def upsert_campaign(self, campaign: Campaign) -> Literal["created", "updated", "skipped_console"]:
+        """Insert or update a campaign from the kanban import.
+
+        A slug owned by the console (`source = 'console'`, console ADR 039) is never
+        touched, neither its row nor its keywords. The ownership read and the writes
+        share one IMMEDIATE transaction, so a concurrent console write cannot slip in.
+        """
         if not campaign.slug.strip():
             raise ValueError("campaign slug must be non-empty")
         keywords = [keyword.strip() for keyword in campaign.keywords if keyword.strip()]
@@ -395,7 +404,16 @@ class TikTokBackofficeStore:
             raise ValueError("campaign must have at least one keyword")
         if not campaign.reply_template.strip():
             raise ValueError("reply_template must be non-empty")
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
+            connection.isolation_level = None
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT source FROM tiktok_campaigns WHERE slug = ?", (campaign.slug,)
+            ).fetchone()
+            if existing is not None and existing["source"] == "console":
+                connection.execute("COMMIT")
+                return "skipped_console"
             connection.execute(
                 """
                 INSERT INTO tiktok_campaigns (slug, name, reply_template, active)
@@ -405,6 +423,7 @@ class TikTokBackofficeStore:
                     reply_template = excluded.reply_template,
                     active = excluded.active,
                     updated_at = CURRENT_TIMESTAMP
+                WHERE tiktok_campaigns.source != 'console'
                 """,
                 (campaign.slug, campaign.name, campaign.reply_template, int(campaign.active)),
             )
@@ -413,7 +432,19 @@ class TikTokBackofficeStore:
                 "INSERT INTO tiktok_campaign_keywords (campaign_slug, keyword) VALUES (?, ?)",
                 [(campaign.slug, keyword) for keyword in keywords],
             )
+            connection.execute("COMMIT")
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+        return "created" if existing is None else "updated"
 
+
+    def campaign_columns(self) -> list[str]:
+        with self._connect() as connection:
+            return [row[1] for row in connection.execute("PRAGMA table_info(tiktok_campaigns)")]
 
     def list_campaigns(self) -> list[dict]:
         with self._connect() as connection:
@@ -803,3 +834,11 @@ class TikTokBackofficeStore:
                 )
                 """
             )
+            # s13 (console ADR 039): first additive migration. Columns are appended at the
+            # end of the table; `source` marks console-owned campaigns, `dm_text` carries
+            # the console's DM text (read by nobody until s23/s24).
+            campaign_columns = {row[1] for row in connection.execute("PRAGMA table_info(tiktok_campaigns)")}
+            if "source" not in campaign_columns:
+                connection.execute("ALTER TABLE tiktok_campaigns ADD COLUMN source TEXT NOT NULL DEFAULT 'kanban'")
+            if "dm_text" not in campaign_columns:
+                connection.execute("ALTER TABLE tiktok_campaigns ADD COLUMN dm_text TEXT")

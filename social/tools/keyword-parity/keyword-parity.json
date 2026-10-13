@@ -1,0 +1,5413 @@
+{
+  "sets": [
+    {
+      "campaign": [
+        {
+          "meta_index": 0,
+          "text": "je veux la voicebox",
+          "tiktok_keyword": "la voicebox"
+        },
+        {
+          "meta_index": null,
+          "text": "sans voicebox",
+          "tiktok_keyword": "voicebox"
+        },
+        {
+          "meta_index": 2,
+          "text": "la voicebix stp",
+          "tiktok_keyword": "voicebix"
+        },
+        {
+          "meta_index": 0,
+          "text": "VOICEBOX EP10 !",
+          "tiktok_keyword": "ep10"
+        },
+        {
+          "meta_index": null,
+          "text": "voici  box",
+          "tiktok_keyword": "voici box"
+        },
+        {
+          "meta_index": 7,
+          "text": "voici box",
+          "tiktok_keyword": "voici box"
+        },
+        {
+          "meta_index": 9,
+          "text": "c'est quoi ep10",
+          "tiktok_keyword": "ep10"
+        },
+        {
+          "meta_index": 14,
+          "text": "bo\u00eete \u00e0 voix",
+          "tiktok_keyword": "bo\u00eete \u00e0 voix"
+        },
+        {
+          "meta_index": null,
+          "text": "rien \u00e0 voir",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "le syst\u00e8me ep8 svp",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "systeme",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "pas de syst\u00e8me",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "SYST\u00c8MES",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "system",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "syst\u00eame ?",
+          "tiktok_keyword": null
+        }
+      ],
+      "keywords": [
+        "voicebox",
+        "voice box",
+        "voicebix",
+        "vo\u00efcebox",
+        "voiceb\u00f4x",
+        "voisbox",
+        "voixbox",
+        "voici box",
+        "voicebox ep10",
+        "ep10",
+        "vb",
+        "voicebx",
+        "vociebox",
+        "voicebox!",
+        "bo\u00eete \u00e0 voix",
+        "voice-box",
+        "voicebox10",
+        "la voicebox"
+      ],
+      "name": "voicebox-ep10",
+      "pairs": [
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "VOICEBOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "Voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "je veux voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "(voicebox)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "\"voicebox\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "sans voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "Sans voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "pas de voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "pas  de voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "lavoicebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "voicebox2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "voicebox_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "l'voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "je veux  voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "je veux\nvoicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "je veux\tvoicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "  voicebox  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "je veux la voicebox stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "JE VEUX VOICEBOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "VOICE BOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "Voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "je veux voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "voice box ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "voice box!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "(voice box)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "\"voice box\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "voice box\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "sans voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "Sans voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "pas de voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "pas  de voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "lavoice box",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "voice box2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "voice box_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "voice box-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "l'voice box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "voice  box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "voice\nbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "voice\tbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "voice box\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "  voice box  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "je veux la voice box stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice box",
+          "meta": true,
+          "text": "JE VEUX VOICE BOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "VOICEBIX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "Voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "je veux voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "voicebix ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "voicebix!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "(voicebix)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "\"voicebix\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "voicebix\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": false,
+          "text": "sans voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": false,
+          "text": "Sans voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": false,
+          "text": "pas de voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": false,
+          "text": "pas  de voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": false,
+          "text": "lavoicebix",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebix",
+          "meta": false,
+          "text": "voicebix2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebix",
+          "meta": false,
+          "text": "voicebix_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "voicebix-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "l'voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "je veux  voicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "je veux\nvoicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "je veux\tvoicebix",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "voicebix\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "  voicebix  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "je veux la voicebix stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebix",
+          "meta": true,
+          "text": "JE VEUX VOICEBIX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "VO\u00cfCEBOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "Vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "je veux voi\u0308cebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "voi\u0308cebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "vo\u00efcebox ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "vo\u00efcebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "(vo\u00efcebox)",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "\"vo\u00efcebox\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "vo\u00efcebox\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "sans vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "Sans vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "pas de vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "pas  de vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "lavo\u00efcebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "vo\u00efcebox2",
+          "tiktok": false
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "vo\u00efcebox_",
+          "tiktok": false
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "vo\u00efcebox-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "l'vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "je veux  vo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "je veux\nvo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "je veux\tvo\u00efcebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "vo\u00efcebox\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "  vo\u00efcebox  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "je veux la vo\u00efcebox stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": true,
+          "text": "JE VEUX VO\u00cfCEBOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "VOICEB\u00d4X",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "Voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "je veux voicebo\u0302x",
+          "tiktok": false
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "voicebo\u0302x",
+          "tiktok": false
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "voiceb\u00f4x ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "voiceb\u00f4x!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "(voiceb\u00f4x)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "\"voiceb\u00f4x\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "voiceb\u00f4x\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "sans voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "Sans voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "pas de voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "pas  de voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "lavoiceb\u00f4x",
+          "tiktok": false
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "voiceb\u00f4x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": false,
+          "text": "voiceb\u00f4x_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "voiceb\u00f4x-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "l'voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "je veux  voiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "je veux\nvoiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "je veux\tvoiceb\u00f4x",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "voiceb\u00f4x\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "  voiceb\u00f4x  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "je veux la voiceb\u00f4x stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voiceb\u00f4x",
+          "meta": true,
+          "text": "JE VEUX VOICEB\u00d4X !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "VOISBOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "Voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "je veux voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "voisbox ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "voisbox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "(voisbox)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "\"voisbox\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "voisbox\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": false,
+          "text": "sans voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": false,
+          "text": "Sans voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": false,
+          "text": "pas de voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": false,
+          "text": "pas  de voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": false,
+          "text": "lavoisbox",
+          "tiktok": false
+        },
+        {
+          "keyword": "voisbox",
+          "meta": false,
+          "text": "voisbox2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voisbox",
+          "meta": false,
+          "text": "voisbox_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "voisbox-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "l'voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "je veux  voisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "je veux\nvoisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "je veux\tvoisbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "voisbox\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "  voisbox  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "je veux la voisbox stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voisbox",
+          "meta": true,
+          "text": "JE VEUX VOISBOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "VOIXBOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "Voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "je veux voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "voixbox ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "voixbox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "(voixbox)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "\"voixbox\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "voixbox\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": false,
+          "text": "sans voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": false,
+          "text": "Sans voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": false,
+          "text": "pas de voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": false,
+          "text": "pas  de voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": false,
+          "text": "lavoixbox",
+          "tiktok": false
+        },
+        {
+          "keyword": "voixbox",
+          "meta": false,
+          "text": "voixbox2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voixbox",
+          "meta": false,
+          "text": "voixbox_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "voixbox-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "l'voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "je veux  voixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "je veux\nvoixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "je veux\tvoixbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "voixbox\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "  voixbox  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "je veux la voixbox stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voixbox",
+          "meta": true,
+          "text": "JE VEUX VOIXBOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "VOICI BOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "Voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "je veux voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "voici box ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "voici box!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "(voici box)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "\"voici box\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "voici box\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "sans voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "Sans voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "pas de voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "pas  de voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "lavoici box",
+          "tiktok": false
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "voici box2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "voici box_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "voici box-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "l'voici box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "voici  box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "voici\nbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "voici\tbox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "voici box\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "  voici box  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "je veux la voici box stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voici box",
+          "meta": true,
+          "text": "JE VEUX VOICI BOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "VOICEBOX EP10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "Voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "je veux voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "voicebox ep10 ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "voicebox ep10!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "(voicebox ep10)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "\"voicebox ep10\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "voicebox ep10\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "sans voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "Sans voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "pas de voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "pas  de voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "lavoicebox ep10",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "voicebox ep102",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "voicebox ep10_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "voicebox ep10-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "l'voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "voicebox  ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "voicebox\nep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "voicebox\tep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "voicebox ep10\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "  voicebox ep10  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "je veux la voicebox ep10 stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": true,
+          "text": "JE VEUX VOICEBOX EP10 !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "EP10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "Ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "je veux ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "ep10 ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "ep10!",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "(ep10)",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "\"ep10\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "ep10\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": false,
+          "text": "sans ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": false,
+          "text": "Sans ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": false,
+          "text": "pas de ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": false,
+          "text": "pas  de ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": false,
+          "text": "laep10",
+          "tiktok": false
+        },
+        {
+          "keyword": "ep10",
+          "meta": false,
+          "text": "ep102",
+          "tiktok": false
+        },
+        {
+          "keyword": "ep10",
+          "meta": false,
+          "text": "ep10_",
+          "tiktok": false
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "ep10-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "l'ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "je veux  ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "je veux\nep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "je veux\tep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "ep10\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "  ep10  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "je veux la ep10 stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "JE VEUX EP10 !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "VB",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "Vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "je veux vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "vb ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "vb!",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "(vb)",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "\"vb\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "vb\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": false,
+          "text": "sans vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": false,
+          "text": "Sans vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": false,
+          "text": "pas de vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": false,
+          "text": "pas  de vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": false,
+          "text": "lavb",
+          "tiktok": false
+        },
+        {
+          "keyword": "vb",
+          "meta": false,
+          "text": "vb2",
+          "tiktok": false
+        },
+        {
+          "keyword": "vb",
+          "meta": false,
+          "text": "vb_",
+          "tiktok": false
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "vb-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "l'vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "je veux  vb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "je veux\nvb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "je veux\tvb",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "vb\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "  vb  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "je veux la vb stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "JE VEUX VB !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "VOICEBX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "Voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "je veux voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "voicebx ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "voicebx!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "(voicebx)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "\"voicebx\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "voicebx\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": false,
+          "text": "sans voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": false,
+          "text": "Sans voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": false,
+          "text": "pas de voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": false,
+          "text": "pas  de voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": false,
+          "text": "lavoicebx",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebx",
+          "meta": false,
+          "text": "voicebx2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebx",
+          "meta": false,
+          "text": "voicebx_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "voicebx-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "l'voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "je veux  voicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "je veux\nvoicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "je veux\tvoicebx",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "voicebx\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "  voicebx  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "je veux la voicebx stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebx",
+          "meta": true,
+          "text": "JE VEUX VOICEBX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "VOCIEBOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "Vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "je veux vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "vociebox ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "vociebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "(vociebox)",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "\"vociebox\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "vociebox\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": false,
+          "text": "sans vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": false,
+          "text": "Sans vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": false,
+          "text": "pas de vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": false,
+          "text": "pas  de vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": false,
+          "text": "lavociebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "vociebox",
+          "meta": false,
+          "text": "vociebox2",
+          "tiktok": false
+        },
+        {
+          "keyword": "vociebox",
+          "meta": false,
+          "text": "vociebox_",
+          "tiktok": false
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "vociebox-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "l'vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "je veux  vociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "je veux\nvociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "je veux\tvociebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "vociebox\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "  vociebox  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "je veux la vociebox stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "vociebox",
+          "meta": true,
+          "text": "JE VEUX VOCIEBOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "VOICEBOX!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "Voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "je veux voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "voicebox! ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "voicebox!!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "(voicebox!)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "\"voicebox!\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "voicebox!\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": false,
+          "text": "sans voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": false,
+          "text": "Sans voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": false,
+          "text": "pas de voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": false,
+          "text": "pas  de voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": false,
+          "text": "lavoicebox!",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": false,
+          "text": "voicebox!2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": false,
+          "text": "voicebox!_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "voicebox!-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "l'voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "je veux  voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "je veux\nvoicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "je veux\tvoicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "voicebox!\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "  voicebox!  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "je veux la voicebox! stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox!",
+          "meta": true,
+          "text": "JE VEUX VOICEBOX! !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "bo\u00eete \u00e0 voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "BO\u00ceTE \u00c0 VOIX",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "Bo\u00eete \u00e0 voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "je veux boi\u0302te a\u0300 voix",
+          "tiktok": false
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "boi\u0302te a\u0300 voix",
+          "tiktok": false
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "bo\u00eete \u00e0 voix ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "bo\u00eete \u00e0 voix!",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "(bo\u00eete \u00e0 voix)",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "\"bo\u00eete \u00e0 voix\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "bo\u00eete \u00e0 voix\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "sans bo\u00eete \u00e0 voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "Sans bo\u00eete \u00e0 voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "pas de bo\u00eete \u00e0 voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "pas  de bo\u00eete \u00e0 voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "labo\u00eete \u00e0 voix",
+          "tiktok": false
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "bo\u00eete \u00e0 voix2",
+          "tiktok": false
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "bo\u00eete \u00e0 voix_",
+          "tiktok": false
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "bo\u00eete \u00e0 voix-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "l'bo\u00eete \u00e0 voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "bo\u00eete  \u00e0  voix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "bo\u00eete\n\u00e0\nvoix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "bo\u00eete\t\u00e0\tvoix",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "bo\u00eete \u00e0 voix\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "  bo\u00eete \u00e0 voix  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "je veux la bo\u00eete \u00e0 voix stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "JE VEUX BO\u00ceTE \u00c0 VOIX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "VOICE-BOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "Voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "je veux voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "voice-box ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "voice-box!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "(voice-box)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "\"voice-box\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "voice-box\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": false,
+          "text": "sans voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": false,
+          "text": "Sans voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": false,
+          "text": "pas de voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": false,
+          "text": "pas  de voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": false,
+          "text": "lavoice-box",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice-box",
+          "meta": false,
+          "text": "voice-box2",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice-box",
+          "meta": false,
+          "text": "voice-box_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "voice-box-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "l'voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "je veux  voice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "je veux\nvoice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "je veux\tvoice-box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "voice-box\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "  voice-box  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "je veux la voice-box stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voice-box",
+          "meta": true,
+          "text": "JE VEUX VOICE-BOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "VOICEBOX10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "Voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "je veux voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "voicebox10 ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "voicebox10!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "(voicebox10)",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "\"voicebox10\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "voicebox10\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": false,
+          "text": "sans voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": false,
+          "text": "Sans voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": false,
+          "text": "pas de voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": false,
+          "text": "pas  de voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": false,
+          "text": "lavoicebox10",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": false,
+          "text": "voicebox102",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": false,
+          "text": "voicebox10_",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "voicebox10-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "l'voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "je veux  voicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "je veux\nvoicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "je veux\tvoicebox10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "voicebox10\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "  voicebox10  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "je veux la voicebox10 stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox10",
+          "meta": true,
+          "text": "JE VEUX VOICEBOX10 !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "LA VOICEBOX",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "La voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "je veux la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "la voicebox ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "la voicebox!",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "(la voicebox)",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "\"la voicebox\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "la voicebox\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "sans la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "Sans la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "pas de la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "pas  de la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "lala voicebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "la voicebox2",
+          "tiktok": false
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "la voicebox_",
+          "tiktok": false
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "la voicebox-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "l'la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "la  voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "la\nvoicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": false,
+          "text": "la\tvoicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "la voicebox\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "  la voicebox  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "je veux la la voicebox stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "la voicebox",
+          "meta": true,
+          "text": "JE VEUX LA VOICEBOX !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "voicebix",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "vo\u00efcebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "vo\u00efcebox",
+          "meta": false,
+          "text": "voicebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "voiceb\u00f4x",
+          "tiktok": false
+        },
+        {
+          "keyword": "voici box",
+          "meta": false,
+          "text": "voici  box",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "voici box",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "voice box",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "voicebox",
+          "tiktok": false
+        },
+        {
+          "keyword": "voice box",
+          "meta": false,
+          "text": "voice-box",
+          "tiktok": false
+        },
+        {
+          "keyword": "ep10",
+          "meta": true,
+          "text": "voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "voicebox ep10",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "voicebox10",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox ep10",
+          "meta": false,
+          "text": "ep10",
+          "tiktok": false
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": true,
+          "text": "sans la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "pas de voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "pas\nde voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "sans voicebox mais avec la voicebox",
+          "tiktok": true
+        },
+        {
+          "keyword": "voicebox",
+          "meta": false,
+          "text": "vb",
+          "tiktok": false
+        },
+        {
+          "keyword": "vb",
+          "meta": true,
+          "text": "VB stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": false,
+          "text": "boite a voix",
+          "tiktok": false
+        },
+        {
+          "keyword": "bo\u00eete \u00e0 voix",
+          "meta": true,
+          "text": "BO\u00ceTE \u00c0 VOIX",
+          "tiktok": true
+        }
+      ],
+      "synthetic": true
+    },
+    {
+      "campaign": [
+        {
+          "meta_index": null,
+          "text": "je veux la voicebox",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "sans voicebox",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "la voicebix stp",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "VOICEBOX EP10 !",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "voici  box",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "voici box",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "c'est quoi ep10",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "bo\u00eete \u00e0 voix",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "rien \u00e0 voir",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": 0,
+          "text": "le syst\u00e8me ep8 svp",
+          "tiktok_keyword": "syst\u00e8me"
+        },
+        {
+          "meta_index": 1,
+          "text": "systeme",
+          "tiktok_keyword": "systeme"
+        },
+        {
+          "meta_index": null,
+          "text": "pas de syst\u00e8me",
+          "tiktok_keyword": "syst\u00e8me"
+        },
+        {
+          "meta_index": 4,
+          "text": "SYST\u00c8MES",
+          "tiktok_keyword": "syst\u00e8mes"
+        },
+        {
+          "meta_index": 5,
+          "text": "system",
+          "tiktok_keyword": "system"
+        },
+        {
+          "meta_index": 3,
+          "text": "syst\u00eame ?",
+          "tiktok_keyword": "syst\u00eame"
+        }
+      ],
+      "keywords": [
+        "syst\u00e8me",
+        "systeme",
+        "syst\u00e9me",
+        "syst\u00eame",
+        "syst\u00e8mes",
+        "system",
+        "sisteme",
+        "syst\u00e8me ep8"
+      ],
+      "name": "systeme-ep8",
+      "pairs": [
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "SYST\u00c8ME",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "Syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "je veux syste\u0300me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "syste\u0300me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "syst\u00e8me ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "syst\u00e8me!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "(syst\u00e8me)",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "\"syst\u00e8me\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "syst\u00e8me\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "sans syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "Sans syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "pas de syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "pas  de syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "lasyst\u00e8me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "syst\u00e8me2",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "syst\u00e8me_",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "syst\u00e8me-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "l'syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "je veux  syst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "je veux\nsyst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "je veux\tsyst\u00e8me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "syst\u00e8me\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "  syst\u00e8me  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "je veux la syst\u00e8me stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "JE VEUX SYST\u00c8ME !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "SYSTEME",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "Systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "je veux systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "systeme ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "systeme!",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "(systeme)",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "\"systeme\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "systeme\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "sans systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "Sans systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "pas de systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "pas  de systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "lasysteme",
+          "tiktok": false
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "systeme2",
+          "tiktok": false
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "systeme_",
+          "tiktok": false
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "systeme-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "l'systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "je veux  systeme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "je veux\nsysteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "je veux\tsysteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "systeme\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "  systeme  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "je veux la systeme stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": true,
+          "text": "JE VEUX SYSTEME !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "SYST\u00c9ME",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "Syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "je veux syste\u0301me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "syste\u0301me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "syst\u00e9me ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "syst\u00e9me!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "(syst\u00e9me)",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "\"syst\u00e9me\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "syst\u00e9me\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "sans syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "Sans syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "pas de syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "pas  de syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "lasyst\u00e9me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "syst\u00e9me2",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": false,
+          "text": "syst\u00e9me_",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "syst\u00e9me-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "l'syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "je veux  syst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "je veux\nsyst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "je veux\tsyst\u00e9me",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "syst\u00e9me\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "  syst\u00e9me  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "je veux la syst\u00e9me stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e9me",
+          "meta": true,
+          "text": "JE VEUX SYST\u00c9ME !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "SYST\u00caME",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "Syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "je veux syste\u0302me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "syste\u0302me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "syst\u00eame ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "syst\u00eame!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "(syst\u00eame)",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "\"syst\u00eame\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "syst\u00eame\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "sans syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "Sans syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "pas de syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "pas  de syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "lasyst\u00eame",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "syst\u00eame2",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": false,
+          "text": "syst\u00eame_",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "syst\u00eame-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "l'syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "je veux  syst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "je veux\nsyst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "je veux\tsyst\u00eame",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "syst\u00eame\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "  syst\u00eame  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "je veux la syst\u00eame stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00eame",
+          "meta": true,
+          "text": "JE VEUX SYST\u00caME !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "SYST\u00c8MES",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "Syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "je veux syste\u0300mes",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "syste\u0300mes",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "syst\u00e8mes ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "syst\u00e8mes!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "(syst\u00e8mes)",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "\"syst\u00e8mes\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "syst\u00e8mes\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "sans syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "Sans syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "pas de syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "pas  de syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "lasyst\u00e8mes",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "syst\u00e8mes2",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "syst\u00e8mes_",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "syst\u00e8mes-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "l'syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "je veux  syst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "je veux\nsyst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "je veux\tsyst\u00e8mes",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "syst\u00e8mes\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "  syst\u00e8mes  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "je veux la syst\u00e8mes stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": true,
+          "text": "JE VEUX SYST\u00c8MES !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "SYSTEM",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "System",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "je veux system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "system ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "system!",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "(system)",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "\"system\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "system\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": false,
+          "text": "sans system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": false,
+          "text": "Sans system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": false,
+          "text": "pas de system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": false,
+          "text": "pas  de system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": false,
+          "text": "lasystem",
+          "tiktok": false
+        },
+        {
+          "keyword": "system",
+          "meta": false,
+          "text": "system2",
+          "tiktok": false
+        },
+        {
+          "keyword": "system",
+          "meta": false,
+          "text": "system_",
+          "tiktok": false
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "system-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "l'system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "je veux  system",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "je veux\nsystem",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "je veux\tsystem",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "system\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "  system  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "je veux la system stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "system",
+          "meta": true,
+          "text": "JE VEUX SYSTEM !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "SISTEME",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "Sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "je veux sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "sisteme ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "sisteme!",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "(sisteme)",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "\"sisteme\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "sisteme\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": false,
+          "text": "sans sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": false,
+          "text": "Sans sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": false,
+          "text": "pas de sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": false,
+          "text": "pas  de sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": false,
+          "text": "lasisteme",
+          "tiktok": false
+        },
+        {
+          "keyword": "sisteme",
+          "meta": false,
+          "text": "sisteme2",
+          "tiktok": false
+        },
+        {
+          "keyword": "sisteme",
+          "meta": false,
+          "text": "sisteme_",
+          "tiktok": false
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "sisteme-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "l'sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "je veux  sisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "je veux\nsisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "je veux\tsisteme",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "sisteme\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "  sisteme  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "je veux la sisteme stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "sisteme",
+          "meta": true,
+          "text": "JE VEUX SISTEME !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "SYST\u00c8ME EP8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "Syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "je veux syste\u0300me ep8",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "syste\u0300me ep8",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "syst\u00e8me ep8 ?",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "syst\u00e8me ep8!",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "(syst\u00e8me ep8)",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "\"syst\u00e8me ep8\"",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "syst\u00e8me ep8\u2026",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "sans syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "Sans syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "pas de syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "pas  de syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "lasyst\u00e8me ep8",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "syst\u00e8me ep82",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "syst\u00e8me ep8_",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "syst\u00e8me ep8-y",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "l'syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "syst\u00e8me  ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "syst\u00e8me\nep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "syst\u00e8me\tep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "syst\u00e8me ep8\ud83d\udd25",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "  syst\u00e8me ep8  ",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "je veux la syst\u00e8me ep8 stp",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "JE VEUX SYST\u00c8ME EP8 !!",
+          "tiktok": true
+        },
+        {
+          "keyword": "systeme",
+          "meta": false,
+          "text": "syst\u00e8me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "systeme",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "syst\u00e9me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": true,
+          "text": "SYST\u00c8ME",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "syst\u00e8mes",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8mes",
+          "meta": false,
+          "text": "syst\u00e8me",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "system",
+          "tiktok": false
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": true,
+          "text": "le syst\u00e8me ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "le syst\u00e8me  ep8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me ep8",
+          "meta": false,
+          "text": "Syst\u00e8me\u00a0EP8",
+          "tiktok": true
+        },
+        {
+          "keyword": "syst\u00e8me",
+          "meta": false,
+          "text": "sans syst\u00e8me",
+          "tiktok": true
+        }
+      ],
+      "synthetic": true
+    },
+    {
+      "campaign": [
+        {
+          "meta_index": null,
+          "text": "je veux la voicebox",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "sans voicebox",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "la voicebix stp",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "VOICEBOX EP10 !",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "voici  box",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "voici box",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "c'est quoi ep10",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "bo\u00eete \u00e0 voix",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "rien \u00e0 voir",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "le syst\u00e8me ep8 svp",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "systeme",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "pas de syst\u00e8me",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "SYST\u00c8MES",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "system",
+          "tiktok_keyword": null
+        },
+        {
+          "meta_index": null,
+          "text": "syst\u00eame ?",
+          "tiktok_keyword": null
+        }
+      ],
+      "keywords": [
+        "stra\u00dfe",
+        "strasse",
+        "\u03bb\u03cc\u03b3\u03bf\u03c2",
+        "fiche",
+        "istanbul",
+        "x2",
+        "a_b",
+        "caf\u00e9",
+        "10"
+      ],
+      "name": "boundaries",
+      "pairs": [
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": true
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": true,
+          "text": "Stra\u00dfe",
+          "tiktok": true
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": true,
+          "text": "STRA\u1e9eE",
+          "tiktok": true
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "stra\u00dfe",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": true,
+          "text": "STRASSE",
+          "tiktok": true
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": true
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": true
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "strasse",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": true,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": true
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": true,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": true
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "\u03bb\u03cc\u03b3\u03bf\u03c2",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": true
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "fiche",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": true,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "istanbul",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": true,
+          "text": "x2",
+          "tiktok": true
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "x2",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": true,
+          "text": "a_b",
+          "tiktok": true
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "a_b",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": true,
+          "text": "caf\u00e9",
+          "tiktok": true
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "10\u20ac",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": true,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": true
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "caf\u00e9",
+          "meta": false,
+          "text": "10 ans",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "STRASSE",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "Stra\u00dfe",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "STRA\u1e9eE",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "\u039b\u038c\u0393\u039f\u03a3",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "\u03bb\u03cc\u03b3\u03bf\u03c3",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "\ufb01che",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "\u0130stanbul",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "x2",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "a_b",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "cafe\u0301",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": true,
+          "text": "10\u20ac",
+          "tiktok": true
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "le10",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "\ud83d\udd25caf\u00e9",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": false,
+          "text": "caf\u00e9_",
+          "tiktok": false
+        },
+        {
+          "keyword": "10",
+          "meta": true,
+          "text": "10 ans",
+          "tiktok": true
+        }
+      ],
+      "synthetic": true
+    }
+  ],
+  "version": 1
+}

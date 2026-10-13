@@ -1,5 +1,6 @@
 import argparse
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.campaign_rules import CampaignRule, CampaignRuleStore
@@ -39,6 +40,9 @@ def parse_campaign_card(task_id: str, title: str, body: str | None) -> CampaignR
         return None
 
     platform = fields.get("platform", "any").strip().lower() or "any"
+    if platform == "tiktok":
+        # s13 (ADR 039): a TikTok card belongs to tiktok-backoffice, never to a Meta rule.
+        return None
     if platform not in {"instagram", "facebook", "any"}:
         platform = "any"
 
@@ -64,13 +68,27 @@ def parse_campaign_card(task_id: str, title: str, body: str | None) -> CampaignR
     )
 
 
+@dataclass(frozen=True)
+class KanbanSyncReport:
+    created: int
+    updated: int
+    skipped_console: int
+
+
 def sync_kanban_campaigns(kanban_db: str | Path = DEFAULT_KANBAN_DB, app_db: str | Path = DEFAULT_APP_DB) -> int:
+    report = sync_kanban_campaigns_report(kanban_db, app_db)
+    return report.created + report.updated
+
+
+def sync_kanban_campaigns_report(
+    kanban_db: str | Path = DEFAULT_KANBAN_DB, app_db: str | Path = DEFAULT_APP_DB
+) -> KanbanSyncReport:
     kanban_db = Path(kanban_db)
     if not kanban_db.exists():
         raise FileNotFoundError(f"Kanban database not found: {kanban_db}")
 
     store = CampaignRuleStore(app_db)
-    synced = 0
+    counts = {"created": 0, "updated": 0, "skipped_console": 0}
     with sqlite3.connect(kanban_db) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(tasks)")}
         order_by = "created_at" if "created_at" in columns else "id"
@@ -82,10 +100,9 @@ def sync_kanban_campaigns(kanban_db: str | Path = DEFAULT_KANBAN_DB, app_db: str
         rule = parse_campaign_card(task_id, title, body)
         if rule is None:
             continue
-        store.upsert_rule(rule)
-        synced += 1
+        counts[store.upsert_rule(rule)] += 1
     store.disable_rules_except({task_id for task_id, title, body in rows if parse_campaign_card(task_id, title, body) is not None})
-    return synced
+    return KanbanSyncReport(**counts)
 
 
 def _parse_fields(body: str) -> dict[str, str]:
@@ -113,8 +130,12 @@ def main() -> None:
     parser.add_argument("--db", type=Path, default=DEFAULT_APP_DB)
     args = parser.parse_args()
 
-    synced = sync_kanban_campaigns(args.kanban_db, args.db)
-    print(f"Synced {synced} campaign rule(s)")
+    report = sync_kanban_campaigns_report(args.kanban_db, args.db)
+    synced = report.created + report.updated
+    print(
+        f"Synced {synced} campaign rule(s) created={report.created} updated={report.updated} "
+        f"skipped_console={report.skipped_console}"
+    )
 
 
 if __name__ == "__main__":

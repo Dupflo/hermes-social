@@ -21,7 +21,7 @@ def run(cmd: list[str], *, cwd: Path = ROOT, timeout: int = 600) -> subprocess.C
 
 
 def db_rows(sql: str, params: tuple = ()) -> list[dict]:
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=30)
     con.row_factory = sqlite3.Row
     try:
         return [dict(r) for r in con.execute(sql, params).fetchall()]
@@ -30,7 +30,7 @@ def db_rows(sql: str, params: tuple = ()) -> list[dict]:
 
 
 def db_exec(sql: str, params: tuple = ()) -> None:
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=30)
     try:
         con.execute(sql, params)
         con.commit()

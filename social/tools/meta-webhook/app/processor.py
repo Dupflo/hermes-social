@@ -126,7 +126,7 @@ class CommentProcessor:
 
         rule = self.rule_store.find_matching_rule(event) if self.rule_store else None
         if rule is None:
-            if self.rule_store and self.rule_store.has_enabled_rules():
+            if self.rule_store and self.rule_store.has_any_rule():
                 logger.info(
                     "No campaign rule matched comment_id=%s platform=%s media_id=%s; skipping legacy .env fallback",
                     event.comment_id,

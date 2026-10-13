@@ -16,7 +16,7 @@ def test_campaign_match_creates_single_review_draft(tmp_path):
         "--keywords", "proxy,proxies",
         "--reply", "Je viens de t’envoyer le lien en message privé",
     ]))
-    assert campaign == {"ok": True, "slug": "proxy"}
+    assert campaign == {"ok": True, "slug": "proxy", "result": "created"}
 
     matched = json.loads(run(["--db", str(db), "match", "--campaign", "proxy"]))
 
@@ -45,3 +45,45 @@ def test_match_does_not_touch_non_matching_comments(tmp_path):
 
     assert matched["matched"] == 0
     assert TikTokBackofficeStore(db).next_review_item() is None
+
+
+# --- s13: upsert_campaign outcome and console guard ---------------------------------------
+
+import sqlite3
+
+from app.models import Campaign
+from s13_helpers import CONSOLE_SLUG, dump_campaign, write_console_campaign
+
+
+def test_upsert_campaign_reports_created_then_updated(tmp_path):
+    store = TikTokBackofficeStore(tmp_path / "tiktok.sqlite3")
+
+    assert store.upsert_campaign(Campaign(slug="proxy", name="Proxy", keywords=("proxy",), reply_template="R")) == "created"
+    assert store.upsert_campaign(Campaign(slug="proxy", name="Proxy 2", keywords=("proxy",), reply_template="R")) == "updated"
+
+
+def test_upsert_campaign_skips_a_console_slug(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    store = TikTokBackofficeStore(db)
+    write_console_campaign(db)
+    before = dump_campaign(db, CONSOLE_SLUG)
+
+    result = store.upsert_campaign(
+        Campaign(slug=CONSOLE_SLUG, name="From kanban", keywords=("other",), reply_template="X", active=False)
+    )
+
+    assert result == "skipped_console"
+    assert dump_campaign(db, CONSOLE_SLUG) == before
+
+
+def test_upsert_campaign_sees_a_conversion_made_by_another_connection(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    store = TikTokBackofficeStore(db)
+    kanban = Campaign(slug="voicebox", name="Voicebox", keywords=("voicebox",), reply_template="R")
+    assert store.upsert_campaign(kanban) == "created"
+    with sqlite3.connect(db) as connection:
+        connection.execute("UPDATE tiktok_campaigns SET source = 'console', name = 'Converted' WHERE slug = 'voicebox'")
+    before = dump_campaign(db, "voicebox")
+
+    assert store.upsert_campaign(kanban) == "skipped_console"
+    assert dump_campaign(db, "voicebox") == before

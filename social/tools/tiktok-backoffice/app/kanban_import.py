@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.models import Campaign
@@ -62,7 +63,7 @@ def parse_meta_campaign_card(task_id: str, title: str, body: str | None) -> Camp
     if fields.get("status", "").strip().lower() != "actif":
         return None
     platform = fields.get("platform", "any").strip().lower() or "any"
-    if platform not in {"any", "instagram", "facebook"}:
+    if platform not in {"any", "instagram", "facebook", "tiktok"}:
         return None
     keywords = [keyword.strip().lower() for keyword in fields.get("keywords", "").split(",") if keyword.strip()]
     if not keywords:
@@ -112,8 +113,22 @@ def load_meta_campaigns(kanban_db: str | Path = DEFAULT_KANBAN_DB) -> list[Campa
     return campaigns
 
 
+@dataclass(frozen=True)
+class KanbanImportReport:
+    created: int
+    updated: int
+    skipped_console: int
+
+
 def sync_meta_campaigns_to_tiktok(store: TikTokBackofficeStore, kanban_db: str | Path = DEFAULT_KANBAN_DB) -> int:
-    campaigns = load_meta_campaigns(kanban_db)
-    for campaign in campaigns:
-        store.upsert_campaign(campaign)
-    return len(campaigns)
+    report = sync_meta_campaigns_to_tiktok_report(store, kanban_db)
+    return report.created + report.updated
+
+
+def sync_meta_campaigns_to_tiktok_report(
+    store: TikTokBackofficeStore, kanban_db: str | Path = DEFAULT_KANBAN_DB
+) -> KanbanImportReport:
+    counts = {"created": 0, "updated": 0, "skipped_console": 0}
+    for campaign in load_meta_campaigns(kanban_db):
+        counts[store.upsert_campaign(campaign)] += 1
+    return KanbanImportReport(**counts)

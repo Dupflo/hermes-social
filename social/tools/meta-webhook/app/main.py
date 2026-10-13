@@ -159,6 +159,11 @@ async def _lifespan(_app: FastAPI):
         WebhookDeliveryStore(settings.processed_comments_database).maybe_purge(_now_ms())
     except Exception as exc:
         logger.warning("webhook_delivery_startup_failed %s", type(exc).__name__)
+    # s13 (ADR 039): add campaign_rules.source at startup so the console's write guard can pass.
+    try:
+        CampaignRuleStore(get_settings().processed_comments_database)
+    except Exception as exc:
+        logger.warning("campaign_rules_schema_failed %s", type(exc).__name__)
     yield
 
 
