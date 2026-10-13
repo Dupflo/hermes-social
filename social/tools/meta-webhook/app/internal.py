@@ -15,8 +15,16 @@ sending`; a certain Meta refusal puts the item back `pending`, anything ambiguou
 `sending` (`uncertain`), never a 500. Bounded exception to "codes only": the `graph_error` result of
 the `reply` route carries Meta's raw `error.message` (page token redacted, 300 characters max).
 No other text — comment, reply, username, Graph URL — ever appears in a response or a log.
+
+s16 (console ADR 044): `POST /internal/conversations` and `POST /internal/conversations/messages`
+read the page's private conversations (Instagram and Messenger) from Graph with the page token,
+which never leaves Python. Second bounded exception to "codes only", limited to these two read
+routes: they return conversation data (names, texts) normalised by `app.inbox_read`, and a
+per-platform `graph_error` with Meta's redacted message. Graph only: no database is opened. Ids
+and cursors leave as opaque refs; names, texts and refs are never logged (exception type only).
 """
 
+import asyncio
 import base64
 import binascii
 import hmac
@@ -29,15 +37,26 @@ import httpx
 from fastapi import Depends, FastAPI, Path, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app import replay
 from app.comment_review_store import CommentReviewStore
 from app.config import Settings, get_settings
 from app.graph_client import GraphAPIError, GraphClient
+from app.inbox_read import (
+    REF_PATTERN,
+    as_int,
+    bounded_str,
+    decode_conversation_ref,
+    decode_ref,
+    encode_ref,
+    normalize_conversation,
+    normalize_message,
+    normalize_peer,
+)
 from app.keyword import contains_keyword
 from app.outbound_message_store import OutboundMessageStore
-from app.platform_utils import facebook_graph_comment_id
+from app.platform_utils import facebook_graph_comment_id, owner_identity_sets
 from app.processor import CommentProcessor
 from app.processor_factory import build_comment_processor
 from app.store import ProcessedCommentStore
@@ -53,6 +72,13 @@ REVIEW_TEXT_MAX = 2000
 META_MESSAGE_MAX = 300
 RELEASE_AFTER_MINUTES = 2
 TRANSIENT_META_CODES = {1, 2}
+
+# s16 (console ADR 044): conversation reads. httpx 10 s per request < 12 s per platform < 15 s console.
+INBOX_PLATFORMS = ("instagram", "messenger")
+THREAD_LIMIT = 20
+PLATFORM_TIMEOUT_S = 12
+META_TYPE_MAX = 64
+INBOX_CURSOR_MAX = 2048
 
 CLOSE_REASONS = {
     "window_expired": "clos manuellement, fenêtre Meta dépassée",
@@ -122,6 +148,27 @@ class KeywordMatchBody(BaseModel):
     keywords: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(min_length=1, max_length=100)
 
 
+class ConversationsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    limit: Literal[25, 50]
+
+
+class ConversationMessagesBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    platform: Literal["instagram", "messenger"]
+    ref: Annotated[str, Field(pattern=REF_PATTERN)]
+    cursor: Annotated[str, Field(pattern=REF_PATTERN)] | None = None
+
+    @model_validator(mode="after")
+    def _instagram_has_no_cursor(self) -> "ConversationMessagesBody":
+        # Instagram only exposes the 20 most recent messages of a conversation: never page past them.
+        if self.platform == "instagram" and self.cursor is not None:
+            raise ValueError("instagram cursor")
+        return self
+
+
 class ReviewReplyBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -157,6 +204,107 @@ def safe_meta_message(error: GraphAPIError, page_token: str) -> str:
     if page_token:
         message = message.replace(page_token, "[redacted]")
     return message[:META_MESSAGE_MAX]
+
+
+def graph_error_payload(error: GraphAPIError, page_token: str) -> dict[str, int | str | None]:
+    """Per-platform Meta error (ADR 042 §4 format), every field coerced and bounded (ADR 044 §5)."""
+    return {
+        "result": "graph_error",
+        "code": as_int(error.code),
+        "subcode": as_int(error.subcode),
+        "type": bounded_str(error.meta_type, META_TYPE_MAX),
+        "message": safe_meta_message(error, page_token),
+    }
+
+
+def _unreachable(error: BaseException) -> dict[str, str]:
+    logger.warning("inbox_graph_unreachable %s", type(error).__name__)
+    return {"result": "graph_unreachable"}
+
+
+def _inbox_unconfigured(settings: Settings) -> bool:
+    return not settings.meta_page_access_token or not settings.meta_page_id
+
+
+def _graph_entries(data: object) -> list:
+    entries = data.get("data") if isinstance(data, dict) else None
+    return entries if isinstance(entries, list) else []
+
+
+def _paging(data: object) -> dict:
+    paging = data.get("paging") if isinstance(data, dict) else None
+    return paging if isinstance(paging, dict) else {}
+
+
+async def read_platform_conversations(graph_client, settings: Settings, platform: str, limit: int) -> dict:
+    owner_ids, owner_usernames = owner_identity_sets(settings)
+    try:
+        data = await asyncio.wait_for(
+            graph_client.list_conversations(settings.meta_page_id, platform, limit=limit), PLATFORM_TIMEOUT_S
+        )
+    except GraphAPIError as error:
+        return graph_error_payload(error, settings.meta_page_access_token)
+    except (httpx.HTTPError, asyncio.TimeoutError) as error:
+        return _unreachable(error)
+    conversations = [
+        conversation
+        for conversation in (
+            normalize_conversation(raw, owner_ids, owner_usernames) for raw in _graph_entries(data)
+        )
+        if conversation is not None
+    ]
+    return {"result": "ok", "conversations": conversations, "has_more": bool(_paging(data).get("next"))}
+
+
+async def read_thread(graph_client, settings: Settings, platform: str, conversation_id: str, after: str | None):
+    owner_ids, owner_usernames = owner_identity_sets(settings)
+
+    async def both():
+        return await asyncio.gather(
+            graph_client.get_conversation_participants(conversation_id),
+            graph_client.list_conversation_messages(conversation_id, limit=THREAD_LIMIT, after=after),
+            return_exceptions=True,
+        )
+
+    try:
+        outcomes = await asyncio.wait_for(both(), PLATFORM_TIMEOUT_S)
+    except asyncio.TimeoutError as error:
+        return _unreachable(error)
+    for outcome in outcomes:
+        if isinstance(outcome, GraphAPIError):
+            return graph_error_payload(outcome, settings.meta_page_access_token)
+    for outcome in outcomes:
+        if isinstance(outcome, httpx.HTTPError):
+            return _unreachable(outcome)
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+    participants, data = outcomes
+    entries = _graph_entries(data)
+    messages = [
+        message
+        for message in (normalize_message(raw, owner_ids, owner_usernames) for raw in entries)
+        if message is not None
+    ]
+    older_cursor = None
+    paging = _paging(data)
+    cursors = paging.get("cursors") if isinstance(paging.get("cursors"), dict) else {}
+    graph_after = cursors.get("after")
+    if platform == "messenger" and paging.get("next") and isinstance(graph_after, str) and graph_after:
+        older_cursor = encode_ref(graph_after)
+        if len(older_cursor) > INBOX_CURSOR_MAX:
+            logger.warning("inbox_cursor_too_long")
+            older_cursor = None
+    peer = normalize_peer(
+        participants.get("participants") if isinstance(participants, dict) else None, owner_ids, owner_usernames
+    )
+    return {
+        "result": "ok",
+        "peer": peer,
+        "messages": messages,
+        "older_cursor": older_cursor,
+        "capped": platform == "instagram" and len(entries) >= THREAD_LIMIT,
+    }
 
 
 def _status_or(store: CommentReviewStore, platform: str, comment_id: str, fallback: str) -> str:
@@ -431,6 +579,43 @@ def create_internal_app() -> FastAPI:
             return JSONResponse(status_code=200, content={"result": "released", "status": "pending"})
         status = _status_or(store, platform, comment_id, "sending")
         return JSONResponse(status_code=200, content={"result": "not_releasable", "status": status})
+
+    @app.post("/internal/conversations")
+    async def conversations(body: ConversationsBody) -> JSONResponse:
+        settings = get_settings()
+        if _inbox_unconfigured(settings):
+            return JSONResponse(status_code=503, content={"error": "meta_unconfigured"})
+        async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT_S) as http_client:
+            graph_client = _graph_client_factory(settings, http_client)
+            results = await asyncio.gather(
+                *(
+                    read_platform_conversations(graph_client, settings, platform, body.limit)
+                    for platform in INBOX_PLATFORMS
+                )
+            )
+        return JSONResponse(status_code=200, content=dict(zip(INBOX_PLATFORMS, results)))
+
+    @app.post("/internal/conversations/messages")
+    async def conversation_messages(body: ConversationMessagesBody) -> JSONResponse:
+        # Decoded and validated before any Graph client exists: a forged ref never becomes a Graph path.
+        try:
+            conversation_id = decode_conversation_ref(body.ref)
+            after = decode_ref(body.cursor) if body.cursor is not None else None
+        except ValueError:
+            raise _BadCursor() from None
+        settings = get_settings()
+        if _inbox_unconfigured(settings):
+            return JSONResponse(status_code=503, content={"error": "meta_unconfigured"})
+        async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT_S) as http_client:
+            graph_client = _graph_client_factory(settings, http_client)
+            result = await read_thread(
+                graph_client,
+                settings,
+                body.platform,
+                conversation_id,
+                after if body.platform == "messenger" else None,
+            )
+        return JSONResponse(status_code=200, content=result)
 
     return app
 

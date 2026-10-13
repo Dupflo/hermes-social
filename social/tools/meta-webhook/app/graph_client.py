@@ -12,6 +12,10 @@ PRIVATE_REPLY_BLOCKING_CODES = {10, 200, 230, 551, 10900, 10901, 10903}
 COMMENT_FIELDS_INSTAGRAM = "text,timestamp,username,from,media{id}"
 COMMENT_FIELDS_FACEBOOK = "message,created_time,from"
 
+# s16 (console ADR 044): fields read for the console inbox (conversations of the page, then messages).
+CONVERSATION_FIELDS = "id,updated_time,participants,messages.limit(1){id,message,from,created_time}"
+MESSAGE_FIELDS = "id,message,from,created_time"
+
 
 class GraphAPIError(RuntimeError):
     """Raised when Meta Graph API returns an error response."""
@@ -24,6 +28,7 @@ class GraphAPIError(RuntimeError):
         subcode: int | None = None,
         meta_message: str | None = None,
         http_status: int | None = None,
+        meta_type: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
@@ -31,6 +36,8 @@ class GraphAPIError(RuntimeError):
         # s15 (console ADR 042): raw Meta `error.message` (never an HTML fallback) and HTTP status.
         self.meta_message = meta_message
         self.http_status = http_status
+        # s16 (console ADR 044): Meta `error.type` (e.g. OAuthException), None when absent.
+        self.meta_type = meta_type
 
     @property
     def blocks_private_reply(self) -> bool:
@@ -93,6 +100,37 @@ class GraphClient:
         """Read a comment back (s09 replay): text, date, author and media, per platform."""
         fields = COMMENT_FIELDS_INSTAGRAM if platform == "instagram" else COMMENT_FIELDS_FACEBOOK
         return await self._get(f"/{comment_id}", params={"fields": fields})
+
+    async def list_conversations(
+        self,
+        page_id: str,
+        platform: str,
+        *,
+        limit: int,
+        after: str | None = None,
+    ) -> dict[str, Any]:
+        """s16: conversations of the page on one platform (`instagram` or `messenger`), most recent first."""
+        params = {"platform": platform, "fields": CONVERSATION_FIELDS, "limit": str(limit)}
+        if after is not None:
+            params["after"] = after
+        return await self._get(f"/{page_id}/conversations", params=params)
+
+    async def get_conversation_participants(self, conversation_id: str) -> dict[str, Any]:
+        """s16: participants of one conversation."""
+        return await self._get(f"/{conversation_id}", params={"fields": "participants"})
+
+    async def list_conversation_messages(
+        self,
+        conversation_id: str,
+        *,
+        limit: int,
+        after: str | None = None,
+    ) -> dict[str, Any]:
+        """s16: messages of one conversation, most recent first (`after` goes back in time)."""
+        params = {"fields": MESSAGE_FIELDS, "limit": str(limit)}
+        if after is not None:
+            params["after"] = after
+        return await self._get(f"/{conversation_id}/messages", params=params)
 
     async def _private_reply_to_comment(
         self,
@@ -158,5 +196,6 @@ class GraphClient:
                 subcode=subcode,
                 meta_message=error.get("message"),
                 http_status=response.status_code,
+                meta_type=error.get("type") if isinstance(error.get("type"), str) else None,
             )
         return data

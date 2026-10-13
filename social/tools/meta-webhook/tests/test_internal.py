@@ -176,6 +176,9 @@ ROUTES = [
     ("POST", "/internal/review/instagram/111/reply", {"text": "x"}),
     ("POST", "/internal/review/instagram/111/skip", None),
     ("POST", "/internal/review/instagram/111/release", None),
+    # s16 (console ADR 044): conversation read routes, same auth and same absence from the public app.
+    ("POST", "/internal/conversations", {"limit": 25}),
+    ("POST", "/internal/conversations/messages", {"platform": "messenger", "ref": "dF8x", "cursor": None}),
 ]
 
 
@@ -1176,3 +1179,418 @@ def test_review_routes_log_neither_texts_nor_token(env, client, review, monkeypa
         assert_no_review_data(response)
     for forbidden in (REVIEW_TEXT, REPLY_TEXT, TOKEN, "page-token"):
         assert forbidden not in caplog.text
+
+
+# --- s16 conversation reads (console ADR 044) ------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from app.inbox_read import encode_ref  # noqa: E402
+
+
+PEER_NAME = "secret-peer-name"
+PEER_USERNAME = "secret-peer-handle"
+DM_TEXT = "secret-dm-text"
+IG_USER_ID = "17841400000000000"
+GRAPH_DATE = "2026-10-12T18:02:11+0000"
+
+
+def graph_conversation(conversation_id, *, peer_id="fb-peer-1", text=DM_TEXT):
+    return {
+        "id": conversation_id,
+        "updated_time": GRAPH_DATE,
+        "participants": {
+            "data": [
+                {"id": "999", "name": "Page"},
+                {"id": peer_id, "name": PEER_NAME, "username": PEER_USERNAME, "email": "peer@example.com"},
+            ]
+        },
+        "messages": {"data": [{"id": f"m-{conversation_id}", "message": text, "from": {"id": peer_id},
+                               "created_time": GRAPH_DATE}]},
+    }
+
+
+def graph_messages(count, *, start=0):
+    return [
+        {
+            "id": f"m_{start + index}",
+            "message": f"{DM_TEXT} {start + index}",
+            "from": {"id": "999" if index % 2 else "fb-peer-1"},
+            "created_time": GRAPH_DATE,
+        }
+        for index in range(count)
+    ]
+
+
+class InboxGraph:
+    """Records calls. Per-platform values: a Graph payload, an exception to raise, or an asyncio.Event to wait on."""
+
+    def __init__(self, lists=None, participants=None, messages=None):
+        self.calls = []
+        self.lists = lists or {}
+        self.participants = participants
+        self.messages = messages
+
+    @staticmethod
+    async def _answer(value, default):
+        if isinstance(value, asyncio.Event):
+            await value.wait()
+        if isinstance(value, BaseException):
+            raise value
+        return default if value is None else value
+
+    async def list_conversations(self, page_id, platform, *, limit, after=None):
+        self.calls.append(("list_conversations", page_id, platform, limit, after))
+        return await self._answer(self.lists.get(platform), {"data": []})
+
+    async def get_conversation_participants(self, conversation_id):
+        self.calls.append(("get_conversation_participants", conversation_id))
+        default = {"id": conversation_id, "participants": graph_conversation(conversation_id)["participants"]}
+        return await self._answer(self.participants, default)
+
+    async def list_conversation_messages(self, conversation_id, *, limit, after=None):
+        self.calls.append(("list_conversation_messages", conversation_id, limit, after))
+        return await self._answer(self.messages, {"data": graph_messages(2)})
+
+
+@pytest.fixture
+def inbox(env, monkeypatch):
+    monkeypatch.setenv("META_IG_USER_ID", IG_USER_ID)
+    graph = InboxGraph()
+    use_graph(monkeypatch, graph)
+    return graph
+
+
+def list_conversations(client, limit=25, headers=AUTH):
+    return client.post("/internal/conversations", headers=headers, json={"limit": limit})
+
+
+def read_thread(client, ref, *, platform="messenger", cursor=None, headers=AUTH, extra=None):
+    body = {"platform": platform, "ref": ref, "cursor": cursor, **(extra or {})}
+    return client.post("/internal/conversations/messages", headers=headers, json=body)
+
+
+def assert_no_inbox_leak(response):
+    for forbidden in ("access_token", "graph.facebook.com", "email", "peer@example.com", "page-token", TOKEN):
+        assert forbidden not in response.text
+
+
+# list: nominal
+
+
+def test_conversations_reads_both_platforms(env, client, inbox):
+    inbox.lists = {
+        "instagram": {"data": [graph_conversation("ig_1", peer_id="ig-peer-1")]},
+        "messenger": {"data": [graph_conversation("t_1")], "paging": {"next": "https://x/next"}},
+    }
+
+    response = list_conversations(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"instagram", "messenger"}
+    assert body["instagram"]["result"] == "ok"
+    assert body["instagram"]["has_more"] is False
+    assert body["messenger"]["has_more"] is True
+    assert body["messenger"]["conversations"] == [
+        {
+            "ref": encode_ref("t_1"),
+            "updated_time": GRAPH_DATE,
+            "peer": {"id": "fb-peer-1", "name": PEER_NAME, "username": PEER_USERNAME},
+            "last_message": {"text": DM_TEXT, "from_me": False, "created_time": GRAPH_DATE},
+        }
+    ]
+    assert sorted(inbox.calls) == [
+        ("list_conversations", "999", "instagram", 25, None),
+        ("list_conversations", "999", "messenger", 25, None),
+    ]
+    assert_no_inbox_leak(response)
+
+
+def test_conversations_passes_the_limit_of_fifty(env, client, inbox):
+    list_conversations(client, 50)
+    assert {call[3] for call in inbox.calls} == {50}
+
+
+@pytest.mark.parametrize("body", [{"limit": 30}, {"limit": 25, "extra": 1}, {}, {"limit": "x"}])
+def test_conversations_rejects_invalid_bodies(env, client, inbox, body):
+    response = client.post("/internal/conversations", headers=AUTH, json=body)
+    assert response.status_code == 422
+    assert inbox.calls == []
+
+
+# list: one platform in error (AC 4)
+
+
+def test_instagram_permission_error_leaves_messenger_intact(env, client, inbox):
+    inbox.lists = {
+        "instagram": GraphAPIError(
+            "x", code=10, subcode=None, meta_message="(#10) x", meta_type="OAuthException", http_status=400
+        ),
+        "messenger": {"data": [graph_conversation("t_1")]},
+    }
+
+    body = list_conversations(client).json()
+
+    assert body["instagram"] == {
+        "result": "graph_error",
+        "code": 10,
+        "subcode": None,
+        "type": "OAuthException",
+        "message": "(#10) x",
+    }
+    assert body["messenger"]["result"] == "ok"
+    assert len(body["messenger"]["conversations"]) == 1
+
+
+def test_network_error_is_graph_unreachable(env, client, inbox):
+    inbox.lists = {"instagram": httpx.ConnectError("boom"), "messenger": {"data": []}}
+    body = list_conversations(client).json()
+    assert body["instagram"] == {"result": "graph_unreachable"}
+    assert body["messenger"] == {"result": "ok", "conversations": [], "has_more": False}
+
+
+def test_a_slow_platform_is_unreachable_without_taking_the_other(env, client, inbox, monkeypatch):
+    monkeypatch.setattr(internal, "PLATFORM_TIMEOUT_S", 0.05)
+    inbox.lists = {"instagram": asyncio.Event(), "messenger": {"data": [graph_conversation("t_1")]}}
+
+    response = list_conversations(client)
+
+    assert response.status_code == 200
+    assert response.json()["instagram"] == {"result": "graph_unreachable"}
+    assert response.json()["messenger"]["result"] == "ok"
+    assert len(response.json()["messenger"]["conversations"]) == 1
+
+
+def test_graph_error_fields_are_coerced_and_bounded(env, client, inbox):
+    inbox.lists = {"instagram": GraphAPIError("x", code="10", subcode=True, meta_type="x" * 100)}
+    body = list_conversations(client).json()
+    assert body["instagram"] == {"result": "graph_error", "code": None, "subcode": None, "type": "x" * 64,
+                                 "message": ""}
+
+
+def test_a_conversation_with_an_overlong_id_is_dropped(env, client, inbox):
+    inbox.lists = {"messenger": {"data": [graph_conversation("x" * 300), graph_conversation("t_2"), "junk", {}]}}
+    conversations = list_conversations(client).json()["messenger"]["conversations"]
+    assert [item["ref"] for item in conversations] == [encode_ref("t_2")]
+
+
+# list: the real GraphClient on a MockTransport
+
+
+def test_real_client_400_with_type_is_the_exact_payload(env, client, inbox, monkeypatch):
+    def handler(request):
+        if request.url.params["platform"] == "instagram":
+            return httpx.Response(400, json={"error": {"message": "(#3) x", "type": "OAuthException", "code": 3}})
+        return httpx.Response(200, json={"data": [graph_conversation("t_1")]})
+
+    use_transport(monkeypatch, handler)
+    body = list_conversations(client).json()
+    assert body["instagram"] == {"result": "graph_error", "code": 3, "subcode": None, "type": "OAuthException",
+                                 "message": "(#3) x"}
+    assert body["messenger"]["result"] == "ok"
+
+
+def test_real_client_html_error_has_no_code_and_no_message(env, client, inbox, monkeypatch):
+    use_transport(monkeypatch, lambda request: httpx.Response(502, text="<html>bad gateway</html>"))
+    body = list_conversations(client).json()
+    for platform in ("instagram", "messenger"):
+        assert body[platform] == {"result": "graph_error", "code": None, "subcode": None, "type": None,
+                                  "message": ""}
+
+
+def test_real_client_message_never_carries_the_page_token(env, client, inbox, monkeypatch):
+    use_transport(
+        monkeypatch,
+        lambda request: httpx.Response(400, json={"error": {"message": "bad page-token here", "code": 190}}),
+    )
+    response = list_conversations(client)
+    assert response.json()["instagram"]["message"] == "bad [redacted] here"
+    assert "page-token" not in response.text
+
+
+def test_real_client_message_is_truncated_to_300(env, client, inbox, monkeypatch):
+    use_transport(monkeypatch, lambda request: httpx.Response(400, json={"error": {"message": "m" * 500, "code": 1}}))
+    assert list_conversations(client).json()["messenger"]["message"] == "m" * 300
+
+
+def test_real_client_network_error_is_unreachable(env, client, inbox, monkeypatch):
+    def handler(request):
+        raise httpx.ConnectError("boom")
+
+    use_transport(monkeypatch, handler)
+    body = list_conversations(client).json()
+    assert body == {"instagram": {"result": "graph_unreachable"}, "messenger": {"result": "graph_unreachable"}}
+
+
+# configuration
+
+
+@pytest.mark.parametrize("variable", ["META_PAGE_ACCESS_TOKEN", "META_PAGE_ID"])
+def test_unconfigured_page_is_503_without_graph(env, client, inbox, monkeypatch, variable):
+    monkeypatch.setenv(variable, "")
+    assert list_conversations(client).status_code == 503
+    assert list_conversations(client).json() == {"error": "meta_unconfigured"}
+    response = read_thread(client, encode_ref("t_1"))
+    assert response.status_code == 503
+    assert response.json() == {"error": "meta_unconfigured"}
+    assert inbox.calls == []
+
+
+def test_both_routes_work_without_any_database(env, client, inbox, monkeypatch, tmp_path):
+    database = tmp_path / "absent" / "processed.sqlite3"
+    monkeypatch.setenv("PROCESSED_COMMENTS_DATABASE", str(database))
+    assert list_conversations(client).status_code == 200
+    assert read_thread(client, encode_ref("t_1")).status_code == 200
+    assert not database.parent.exists()
+
+
+# thread
+
+
+def test_messenger_thread_reads_participants_and_messages(env, client, inbox):
+    inbox.messages = {"data": graph_messages(3), "paging": {"next": "https://x/next", "cursors": {"after": "AFTER-1"}}}
+
+    response = read_thread(client, encode_ref("t_123"), cursor=encode_ref("BEFORE-1"))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["result"] == "ok"
+    assert body["peer"] == {"id": "fb-peer-1", "name": PEER_NAME, "username": PEER_USERNAME}
+    assert [message["id"] for message in body["messages"]] == ["m_0", "m_1", "m_2"]
+    assert [message["from_me"] for message in body["messages"]] == [False, True, False]
+    assert body["older_cursor"] == encode_ref("AFTER-1")
+    assert body["capped"] is False
+    assert sorted(inbox.calls) == [
+        ("get_conversation_participants", "t_123"),
+        ("list_conversation_messages", "t_123", 20, "BEFORE-1"),
+    ]
+    assert_no_inbox_leak(response)
+
+
+def test_messenger_thread_without_next_page_has_no_older_cursor(env, client, inbox):
+    inbox.messages = {"data": graph_messages(3), "paging": {"cursors": {"after": "AFTER-1"}}}
+    assert read_thread(client, encode_ref("t_123")).json()["older_cursor"] is None
+
+
+def test_an_overlong_graph_cursor_is_dropped(env, client, inbox, caplog):
+    inbox.messages = {"data": graph_messages(1), "paging": {"next": "n", "cursors": {"after": "c" * 2000}}}
+    with caplog.at_level(logging.WARNING):
+        body = read_thread(client, encode_ref("t_123")).json()
+    assert body["older_cursor"] is None
+    assert "inbox_cursor_too_long" in caplog.text
+
+
+@pytest.mark.parametrize(("count", "capped"), [(20, True), (19, False)])
+def test_instagram_thread_is_capped_at_twenty(env, client, inbox, count, capped):
+    inbox.messages = {"data": graph_messages(count), "paging": {"next": "n", "cursors": {"after": "AFTER"}}}
+
+    body = read_thread(client, encode_ref("ig_1"), platform="instagram").json()
+
+    assert body["capped"] is capped
+    assert body["older_cursor"] is None
+    assert ("list_conversation_messages", "ig_1", 20, None) in inbox.calls
+
+
+def test_instagram_thread_with_a_cursor_is_422(env, client, inbox):
+    response = read_thread(client, encode_ref("ig_1"), platform="instagram", cursor=encode_ref("x"))
+    assert response.status_code == 422
+    assert inbox.calls == []
+
+
+@pytest.mark.parametrize(("ref", "error"), [("!!", "invalid_request"), ("_w", "invalid_cursor")])
+def test_invalid_refs_are_422(env, client, inbox, ref, error):
+    response = read_thread(client, ref)
+    assert response.status_code == 422
+    assert response.json() == {"error": error}
+    response = read_thread(client, encode_ref("t_1"), cursor=ref)
+    assert response.status_code == 422
+    assert response.json() == {"error": error}
+    assert inbox.calls == []
+
+
+@pytest.mark.parametrize("forged", ["me/accounts", "x?y", "../x"])
+def test_forged_refs_never_reach_graph(env, client, inbox, forged):
+    response = read_thread(client, encode_ref(forged))
+    assert response.status_code == 422
+    assert response.json() == {"error": "invalid_cursor"}
+    assert inbox.calls == []
+
+
+@pytest.mark.parametrize(
+    "extra", [{"platform": "facebook"}, {"unexpected": 1}]
+)
+def test_invalid_thread_bodies_are_422(env, client, inbox, extra):
+    assert read_thread(client, encode_ref("t_1"), extra=extra).status_code == 422
+    assert inbox.calls == []
+
+
+def test_unknown_conversation_is_a_graph_error_100(env, client, inbox):
+    inbox.messages = GraphAPIError("x", code=100, meta_message="(#100) x", meta_type="OAuthException", http_status=400)
+    body = read_thread(client, encode_ref("t_0")).json()
+    assert body == {"result": "graph_error", "code": 100, "subcode": None, "type": "OAuthException",
+                    "message": "(#100) x"}
+
+
+def test_a_participants_error_is_a_graph_error(env, client, inbox):
+    inbox.participants = GraphAPIError("x", code=10, meta_message="(#10) x", http_status=400)
+    assert read_thread(client, encode_ref("t_0")).json()["code"] == 10
+
+
+def test_thread_network_error_is_unreachable(env, client, inbox):
+    inbox.messages = httpx.ReadTimeout("slow")
+    assert read_thread(client, encode_ref("t_0")).json() == {"result": "graph_unreachable"}
+
+
+def test_slow_thread_is_unreachable(env, client, inbox, monkeypatch):
+    monkeypatch.setattr(internal, "PLATFORM_TIMEOUT_S", 0.05)
+    inbox.messages = asyncio.Event()
+    response = read_thread(client, encode_ref("t_0"))
+    assert response.status_code == 200
+    assert response.json() == {"result": "graph_unreachable"}
+
+
+def test_real_client_thread_paths(env, client, inbox, monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"data": graph_messages(1)})
+        return httpx.Response(200, json={"id": "t_9", "participants": {"data": [{"id": "fb-peer-1"}]}})
+
+    use_transport(monkeypatch, handler)
+    body = read_thread(client, encode_ref("t_9"), cursor=encode_ref("CUR")).json()
+    assert body["result"] == "ok"
+    paths = sorted(request.url.path for request in requests)
+    assert paths == ["/v21.0/t_9", "/v21.0/t_9/messages"]
+    messages_request = next(request for request in requests if request.url.path.endswith("/messages"))
+    assert messages_request.url.params["after"] == "CUR"
+
+
+# leaks
+
+
+def test_inbox_routes_log_neither_personal_data_nor_token(env, client, inbox, monkeypatch, caplog):
+    inbox.lists = {
+        "instagram": GraphAPIError("x", code=10, meta_message="(#10) x"),
+        "messenger": {"data": [graph_conversation("t_1")]},
+    }
+    ref = encode_ref("t_1")
+    with caplog.at_level(logging.DEBUG):
+        responses = [list_conversations(client), read_thread(client, ref)]
+        inbox.lists = {"instagram": httpx.ConnectError("boom"), "messenger": httpx.ConnectError("boom")}
+        inbox.messages = httpx.ConnectError("boom")
+        responses += [list_conversations(client), read_thread(client, ref)]
+    for response in responses:
+        assert_no_inbox_leak(response)
+    app_logs = "\n".join(record.getMessage() for record in caplog.records if record.name.startswith("app"))
+    assert "inbox_graph_unreachable ConnectError" in app_logs
+    for forbidden in (PEER_NAME, PEER_USERNAME, DM_TEXT, ref, "t_1", TOKEN, "page-token"):
+        assert forbidden not in app_logs
+
+
+def test_serve_keeps_httpx_quiet():
+    """httpx logs the Graph URL (page token included) at INFO: serve.py must stay at WARNING."""
+    serve = (Path(__file__).resolve().parents[1] / "app" / "serve.py").read_text(encoding="utf-8")
+    assert "logging.basicConfig(level=logging.WARNING" in serve
