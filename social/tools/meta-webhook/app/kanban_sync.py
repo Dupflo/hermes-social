@@ -73,6 +73,8 @@ class KanbanSyncReport:
     created: int
     updated: int
     skipped_console: int
+    # s14 (console ADR 040): rules switched from enabled = 1 to 0 by this run.
+    disabled: int = 0
 
 
 def sync_kanban_campaigns(kanban_db: str | Path = DEFAULT_KANBAN_DB, app_db: str | Path = DEFAULT_APP_DB) -> int:
@@ -101,8 +103,8 @@ def sync_kanban_campaigns_report(
         if rule is None:
             continue
         counts[store.upsert_rule(rule)] += 1
-    store.disable_rules_except({task_id for task_id, title, body in rows if parse_campaign_card(task_id, title, body) is not None})
-    return KanbanSyncReport(**counts)
+    disabled = store.disable_rules_except({task_id for task_id, title, body in rows if parse_campaign_card(task_id, title, body) is not None})
+    return KanbanSyncReport(**counts, disabled=disabled)
 
 
 def _parse_fields(body: str) -> dict[str, str]:

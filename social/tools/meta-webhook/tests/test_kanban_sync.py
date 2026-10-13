@@ -206,3 +206,54 @@ def test_sync_kanban_campaigns_cli_prints_counters(tmp_path, monkeypatch, capsys
     kanban_sync_main()
 
     assert capsys.readouterr().out.strip() == "Synced 1 campaign rule(s) created=1 updated=0 skipped_console=1"
+
+
+# --- s14: the report counts the rules the sync switched off (ADR 040 §2) -------------
+
+
+def test_sync_report_counts_disabled_rules(tmp_path):
+    app_db = tmp_path / "app.sqlite3"
+    store = CampaignRuleStore(app_db)
+    _console_row(app_db, "task-console")
+    store.upsert_rule(
+        CampaignRule(
+            source_task_id="task-gone", name="Gone", platform="any", media_id=None,
+            keywords=["gone"], public_reply_text="R", dm_text="D", enabled=True,
+        )
+    )
+    kanban_db = _kanban(
+        tmp_path,
+        [
+            ("task-console", "Same id", ACTIVE_CARD.format(platform="facebook", keyword="other")),
+            ("task-new", "New", ACTIVE_CARD.format(platform="instagram", keyword="proxy")),
+        ],
+    )
+
+    report = sync_kanban_campaigns_report(kanban_db, app_db)
+
+    assert report.disabled == 1
+
+
+def test_sync_report_second_identical_run_disables_nothing(tmp_path):
+    app_db = tmp_path / "app.sqlite3"
+    store = CampaignRuleStore(app_db)
+    store.upsert_rule(
+        CampaignRule(
+            source_task_id="task-gone", name="Gone", platform="any", media_id=None,
+            keywords=["gone"], public_reply_text="R", dm_text="D", enabled=True,
+        )
+    )
+    kanban_db = _kanban(tmp_path, [("task-new", "New", ACTIVE_CARD.format(platform="instagram", keyword="proxy"))])
+
+    first = sync_kanban_campaigns_report(kanban_db, app_db)
+    second = sync_kanban_campaigns_report(kanban_db, app_db)
+
+    assert first.disabled == 1
+    assert second.disabled == 0
+    assert (second.created, second.updated) == (0, 1)
+
+
+def test_kanban_sync_report_disabled_defaults_to_zero():
+    from app.kanban_sync import KanbanSyncReport
+
+    assert KanbanSyncReport(created=1, updated=2, skipped_console=3).disabled == 0

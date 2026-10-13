@@ -106,15 +106,33 @@ class CampaignRuleStore(SQLiteStore):
             row = connection.execute("SELECT 1 FROM campaign_rules LIMIT 1").fetchone()
         return row is not None
 
-    def disable_rules_except(self, active_source_task_ids: set[str]) -> None:
+    def disable_rules_except(self, active_source_task_ids: set[str]) -> int:
         # Console-owned rows (ADR 039) are never disabled by the kanban sync, in both branches.
-        with self._connect() as connection:
+        # s14 (console ADR 040): returns how many rules this call switched from enabled = 1 to 0,
+        # counted in the same IMMEDIATE transaction as the UPDATE, on the UPDATE's own WHERE.
+        connection = self._connect()
+        try:
+            connection.isolation_level = None
+            connection.execute("BEGIN IMMEDIATE")
             if not active_source_task_ids:
+                switched_off = connection.execute(
+                    "SELECT COUNT(*) FROM campaign_rules WHERE source != 'console' AND enabled = 1"
+                ).fetchone()[0]
                 connection.execute(
                     "UPDATE campaign_rules SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE source != 'console'"
                 )
-                return
+                connection.execute("COMMIT")
+                return switched_off
             placeholders = ", ".join("?" for _ in active_source_task_ids)
+            switched_off = connection.execute(
+                f"""
+                SELECT COUNT(*) FROM campaign_rules
+                WHERE source_task_id NOT IN ({placeholders})
+                  AND source != 'console'
+                  AND enabled = 1
+                """,
+                tuple(active_source_task_ids),
+            ).fetchone()[0]
             connection.execute(
                 f"""
                 UPDATE campaign_rules
@@ -124,6 +142,14 @@ class CampaignRuleStore(SQLiteStore):
                 """,
                 tuple(active_source_task_ids),
             )
+            connection.execute("COMMIT")
+            return switched_off
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
 
     def find_matching_rule(self, event: CommentEvent) -> CampaignRule | None:
         candidates = []

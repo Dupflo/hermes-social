@@ -324,3 +324,61 @@ def test_has_any_rule_counts_disabled_rows(tmp_path):
 
     assert store.has_any_rule() is True
     assert store.has_enabled_rules() is False
+
+
+# --- s14: disable_rules_except returns the number of rules it switched off (ADR 040 §2) ---
+
+
+def test_disable_rules_except_counts_an_active_kanban_rule_it_disables(tmp_path):
+    store = CampaignRuleStore(tmp_path / "campaigns.sqlite3")
+    store.upsert_rule(_kanban_rule("gone"))
+
+    assert store.disable_rules_except({"autre"}) == 1
+    assert store.list_rules()[0].enabled is False
+
+
+def test_disable_rules_except_does_not_count_an_already_disabled_rule(tmp_path):
+    store = CampaignRuleStore(tmp_path / "campaigns.sqlite3")
+    store.upsert_rule(_kanban_rule("gone", enabled=False))
+
+    assert store.disable_rules_except({"autre"}) == 0
+    assert store.list_rules()[0].enabled is False
+
+
+def test_disable_rules_except_never_counts_a_console_row(tmp_path):
+    db = tmp_path / "campaigns.sqlite3"
+    store = CampaignRuleStore(db)
+    _insert_console_row(db, enabled=1)
+    before = _dump(db, "console-0123456789ab")
+
+    assert store.disable_rules_except({"autre"}) == 0
+    assert store.disable_rules_except(set()) == 0
+    assert _dump(db, "console-0123456789ab") == before
+
+
+def test_disable_rules_except_empty_set_counts_only_active_kanban_rules(tmp_path):
+    db = tmp_path / "campaigns.sqlite3"
+    store = CampaignRuleStore(db)
+    store.upsert_rule(_kanban_rule("kanban-1"))
+    store.upsert_rule(_kanban_rule("kanban-2"))
+    store.upsert_rule(_kanban_rule("kanban-off", enabled=False))
+    _insert_console_row(db, enabled=1)
+
+    assert store.disable_rules_except(set()) == 2
+
+
+def test_disable_rules_except_does_not_count_a_kept_rule(tmp_path):
+    store = CampaignRuleStore(tmp_path / "campaigns.sqlite3")
+    store.upsert_rule(_kanban_rule("keep"))
+
+    assert store.disable_rules_except({"keep"}) == 0
+    assert store.list_rules()[0].enabled is True
+
+
+def test_disable_rules_except_second_identical_run_counts_zero(tmp_path):
+    store = CampaignRuleStore(tmp_path / "campaigns.sqlite3")
+    store.upsert_rule(_kanban_rule("keep"))
+    store.upsert_rule(_kanban_rule("gone"))
+
+    assert store.disable_rules_except({"keep"}) == 1
+    assert store.disable_rules_except({"keep"}) == 0
