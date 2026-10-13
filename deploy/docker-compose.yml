@@ -6,6 +6,14 @@
 # network — nothing browser-related is published on the public interface.
 # noVNC (6080) and VNC (5901) are bound to 127.0.0.1 only; use an SSH
 # tunnel:  ssh -L 6080:127.0.0.1:6080 root@<vps>  →  http://localhost:6080
+#
+# meta-webhook serves two apps (app/serve.py): the public webhook on 8791
+# (published on 127.0.0.1, fronted by the reverse proxy) and the internal
+# /internal/* API on 8792, never published. 8792 is reached by the console
+# (hermes-console-web) over the `console` network below, an internal network
+# joined by meta-webhook only (console repo: ADR 012 and ADR 030). Its Bearer
+# token lives in the Meta .env mounted on /app/.env, never in this
+# directory's .env (read by the hermes container too).
 
 name: hermes-social
 
@@ -53,7 +61,10 @@ services:
       - ../social/tools/meta-webhook:/app
       - ./meta-webhook-data:/app/data
       - /app/.venv            # keep the venv out of the repo checkout
-    command: ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8791"]
+    command: ["uv", "run", "python", "-m", "app.serve"]
+    networks:
+      - default               # Graph API, hermes
+      - console               # reached by hermes-console-web (internal port 8792)
 
   camofox:
     # Built from https://github.com/jo-inc/camofox-browser → `make camofox`.
@@ -72,3 +83,10 @@ services:
     volumes:
       - ./camofox-data:/root/.camofox
       - ./camofox.config.json:/app/camofox.config.json:ro
+
+networks:
+  # Created by this project (deploy hermes-social before the console), joined
+  # as `external` by the console's web service only. internal: no route out.
+  console:
+    name: hermes-social-console
+    internal: true

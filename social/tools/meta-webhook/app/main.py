@@ -14,7 +14,7 @@ from app.follow_gate_store import FollowGateStore
 from app.graph_client import GraphClient
 from app.outbound_message_store import OutboundMessageStore
 from app.platform_utils import owner_identity_sets
-from app.processor import CommentProcessor
+from app.processor_factory import build_comment_processor
 from app.processor import PrivateMessageProcessor
 from app.security import verify_meta_signature_any
 from app.store import ProcessedCommentStore
@@ -292,20 +292,7 @@ def create_app() -> FastAPI:
                     private_messages_enqueued,
                 )
 
-                processor = CommentProcessor(
-                    graph_client=graph_client,
-                    store=processed_store,
-                    outbound_store=outbound_store,
-                    rule_store=rule_store,
-                    follow_gate_store=follow_gate_store,
-                    page_id=settings.meta_page_id,
-                    keyword=settings.resource_keyword,
-                    resource_url=settings.resource_url,
-                    public_reply_text=settings.public_reply_text,
-                    owner_ids=owner_ids,
-                    owner_usernames=owner_usernames,
-                    instagram_messaging_enabled=bool(settings.instagram_app_secret),
-                )
+                processor = build_comment_processor(settings, graph_client)
                 results = await processor.process_events(events)
 
             logger.info(

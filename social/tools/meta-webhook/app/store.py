@@ -222,6 +222,90 @@ class ProcessedCommentStore(SQLiteStore):
             for row in rows
         ]
 
+    # --- s09: replay from the console (methods added; the ones above are unchanged) ---------
+    # Same clock and thresholds as try_claim: a row is replayable if it is `failed`, or
+    # `claimed` for more than 5 minutes. created_at is rewritten by every claim, so it is only
+    # a lower bound of the comment's age: "older than 7 days" by the database is a safe refusal.
+
+    _REPLAYABLE_SQL = """
+        (status = 'failed' OR (status = 'claimed' AND created_at < datetime('now', '-5 minutes')))
+    """
+
+    def replay_state(self, platform: str, comment_id: str) -> dict[str, bool | str] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT status,
+                       {self._REPLAYABLE_SQL} AS replayable,
+                       created_at < datetime('now', '-7 days') AS window_expired_by_db
+                FROM processed_comments
+                WHERE platform = ? AND comment_id = ?
+                """,
+                (platform, comment_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"status": row[0], "replayable": bool(row[1]), "window_expired_by_db": bool(row[2])}
+
+    def close_manually(self, platform: str, comment_id: str, reason_text: str) -> bool:
+        """Close a failed or stale claimed row as private_reply_blocked. Never inserts, never deletes."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE processed_comments
+                SET status = 'private_reply_blocked',
+                    error_message = ?,
+                    processed_at = CURRENT_TIMESTAMP
+                WHERE platform = ? AND comment_id = ?
+                  AND {self._REPLAYABLE_SQL}
+                """,
+                (reason_text, platform, comment_id),
+            )
+        return cursor.rowcount > 0
+
+    def sqlite_now(self) -> str:
+        with self._connect() as connection:
+            return connection.execute("SELECT CURRENT_TIMESTAMP").fetchone()[0]
+
+    def _batch_where(self, after: tuple[str, str, str] | None) -> tuple[str, list[str]]:
+        clause = f"""
+            platform IN ('instagram', 'facebook')
+            AND {self._REPLAYABLE_SQL}
+            AND created_at >= datetime('now', '-7 days')
+            AND created_at < ?
+        """
+        if after is None:
+            return clause, []
+        return clause + " AND (created_at, platform, comment_id) > (?, ?, ?)", list(after)
+
+    def replayable_batch(
+        self,
+        sweep_started: str,
+        after: tuple[str, str, str] | None,
+        limit: int,
+    ) -> list[dict[str, str]]:
+        clause, params = self._batch_where(after)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT platform, comment_id, created_at
+                FROM processed_comments
+                WHERE {clause}
+                ORDER BY created_at, platform, comment_id
+                LIMIT ?
+                """,
+                [sweep_started, *params, limit],
+            ).fetchall()
+        return [{"platform": row[0], "comment_id": row[1], "created_at": row[2]} for row in rows]
+
+    def count_replayable_after(self, sweep_started: str, after: tuple[str, str, str] | None) -> int:
+        clause, params = self._batch_where(after)
+        with self._connect() as connection:
+            return connection.execute(
+                f"SELECT COUNT(*) FROM processed_comments WHERE {clause}",
+                [sweep_started, *params],
+            ).fetchone()[0]
+
     def _ensure_schema(self) -> None:
         with self._connect() as connection:
             connection.execute(

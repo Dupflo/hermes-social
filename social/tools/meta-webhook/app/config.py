@@ -23,6 +23,10 @@ class Settings(BaseSettings):
 
     graph_api_version: str = Field(default="v21.0")
 
+    # s09: shared secret of the internal listener (:8792, app/internal.py), also set in the
+    # console's .env. Empty = every /internal/* request is refused.
+    console_internal_token: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

@@ -8,6 +8,10 @@ import httpx
 # Anything else (rate limits, transient 1/2, expired token 190…) is retryable.
 PRIVATE_REPLY_BLOCKING_CODES = {10, 200, 230, 551, 10900, 10901, 10903}
 
+# Fields read back when a comment is replayed (s09, console ADR 031 §1).
+COMMENT_FIELDS_INSTAGRAM = "text,timestamp,username,from,media{id}"
+COMMENT_FIELDS_FACEBOOK = "message,created_time,from"
+
 
 class GraphAPIError(RuntimeError):
     """Raised when Meta Graph API returns an error response."""
@@ -73,6 +77,11 @@ class GraphClient:
 
     async def get_instagram_comment_media(self, comment_id: str) -> dict[str, Any]:
         return await self._get(f"/{comment_id}", params={"fields": "media{id,permalink,caption}"})
+
+    async def get_comment(self, comment_id: str, platform: str) -> dict[str, Any]:
+        """Read a comment back (s09 replay): text, date, author and media, per platform."""
+        fields = COMMENT_FIELDS_INSTAGRAM if platform == "instagram" else COMMENT_FIELDS_FACEBOOK
+        return await self._get(f"/{comment_id}", params={"fields": fields})
 
     async def _private_reply_to_comment(
         self,
