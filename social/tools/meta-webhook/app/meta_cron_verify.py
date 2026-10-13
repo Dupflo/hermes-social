@@ -1,25 +1,42 @@
 #!/usr/bin/env python3
+"""Meta verification/backfill worker, run every 15 min by the hermes-console worker (job `meta-backfill`).
+
+Versioned from the production cron script (Hermes job 3fc89601018c, md5 d1310a99bf3ff788f3d3b74d229d8385).
+Run as `python -m app.meta_cron_verify --env-file <abs> --db <abs>` (scripts/console-meta-backfill.sh).
+Output contract (hermes-console ADR 011): `report <json>`, `counters …`, then `CONSOLE_RESULT {…}` as the
+last line when the Graph scan succeeded (exit 0). Scan failed = exit 3, invalid configuration = exit 4.
+"""
 from __future__ import annotations
 
+import argparse
 import asyncio
+import dataclasses
 import datetime as dt
 import json
+import re
 import sqlite3
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-sys.path.insert(0, "/opt/repos/hermes-social/social/tools/meta-webhook")
+from app.campaign_rules import CampaignRuleStore
+from app.comment_review_store import CommentReviewStore
+from app.config import Settings
+from app.keyword import contains_keyword
+from app.platform_utils import owner_identity_sets
+from app.scan_comment_reviews import MetaReviewScanFetcher, _csv_set, run_scan_from_fetcher
+from app.store import ProcessedCommentStore
 
-from app.config import get_settings  # noqa: E402
-from app.keyword import contains_keyword  # noqa: E402
-
-DB = Path("/opt/data/meta-comment-dm-automation/data/processed_comments.sqlite3")
-TOOL = Path("/opt/repos/hermes-social/social/tools/meta-webhook")
-RUNTIME = Path("/opt/data/meta-comment-dm-automation")
+# Module state set by configure() (P1): the production globals DB/TOOL/RUNTIME are gone.
+DB: Path | None = None
+_SETTINGS: Settings | None = None
+_TRANSPORT: httpx.AsyncBaseTransport | None = None
+_COUNTERS: dict[str, int] = {}
+SCAN_TIMEOUT_SEC: float = 300
+EXIT_SCAN_FAILED = 3
+EXIT_INVALID_CONFIG = 4
 PUBLIC_FALLBACK = "C'est envoyé ! Check tes messages privés !"
 FACEBOOK_PUBLIC_REPLY = "C'est envoyé ! Check tes messages privés — regarde aussi dans les invitations / demandes de message Messenger."
 FOLLOW_GATE_PUBLIC_REPLY_TEXT = "Je t’ai envoyé les instructions en privé. Réponds « ✅ J’ai suivi » dans le message privé et je t’envoie le lien."
@@ -50,12 +67,64 @@ def utc_now() -> str:
     return dt.datetime.now(dt.UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def sh(cmd: list[str], timeout: int = 300) -> subprocess.CompletedProcess[str]:
-    env = None
-    import os
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(TOOL) + ((":" + env["PYTHONPATH"]) if env.get("PYTHONPATH") else "")
-    return subprocess.run(cmd, cwd=str(RUNTIME), env=env, text=True, capture_output=True, timeout=timeout)
+def configure(db: Path, settings: Settings, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    global DB, _SETTINGS, _TRANSPORT
+    DB = Path(db)
+    _SETTINGS = settings
+    _TRANSPORT = transport
+    _COUNTERS.clear()
+
+
+def _count(name: str, n: int = 1) -> None:
+    _COUNTERS[name] = _COUNTERS.get(name, 0) + n
+
+
+# Counters of CONSOLE_RESULT (P3). `ok: true` actions count as processed_new, `ok: false` as failed,
+# except these stages.
+ALREADY_PROCESSED_STAGES = {"already_invitation_help_replied"}
+WAITING_STAGES = {"unlock_skipped_no_confirmation_evidence"}
+COUNTER_KEYS = (
+    "examined",
+    "processed_new",
+    "already_processed",
+    "failed",
+    "scanned",
+    "pending_read",
+    "messenger_considered",
+    "inserted_pending",
+    "unmatched",
+)
+
+
+def bucket_for(action: dict[str, Any]) -> str | None:
+    stage = action.get("stage")
+    if stage in WAITING_STAGES:
+        return None
+    if stage in ALREADY_PROCESSED_STAGES:
+        return "already_processed"
+    return "processed_new" if action.get("ok") else "failed"
+
+
+def _settings() -> Settings:
+    if _SETTINGS is None:
+        raise RuntimeError("meta_cron_verify.configure() was not called")
+    return _SETTINGS
+
+
+def _client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=30, transport=_TRANSPORT)
+
+
+_ACCESS_TOKEN_RE = re.compile(r"access_token=[^&\s\"']+")
+
+
+def _scrub(text: str) -> str:
+    """Remove the Page token from an error string before it enters the report."""
+    text = _ACCESS_TOKEN_RE.sub("access_token=<redacted>", text)
+    token = _SETTINGS.meta_page_access_token if _SETTINGS is not None else ""
+    if token:
+        text = text.replace(token, "<redacted>")
+    return text
 
 
 def db_rows(sql: str, params: tuple = ()) -> list[sqlite3.Row]:
@@ -451,6 +520,152 @@ def persist_private_reply_blocked(*, platform: str, comment_id: str, keyword: st
         con.close()
 
 
+# P4 (s10): every successful Meta send is persisted before the next network call, in an immediate
+# transaction. The final rows equal those of persist_success / persist_follow_gate_pending above.
+def _immediate() -> sqlite3.Connection:
+    con = sqlite3.connect(DB, isolation_level=None)
+    con.execute("BEGIN IMMEDIATE")
+    return con
+
+
+def persist_dm_sent(*, platform: str, comment_id: str, keyword: str, dm_text: str, dm_response: dict[str, Any]) -> None:
+    now = utc_now()
+    con = _immediate()
+    try:
+        con.execute(
+            """
+            INSERT INTO processed_comments(platform,comment_id,keyword,status,like_sent,public_reply_sent,dm_sent,created_at,processed_at,error_message)
+            VALUES(?,?,?,'failed',0,0,1,?,?,'public_reply_pending_after_dm')
+            ON CONFLICT(platform,comment_id) DO UPDATE SET
+              keyword=excluded.keyword,status='failed',dm_sent=1,processed_at=excluded.processed_at,error_message=excluded.error_message
+            """,
+            (platform, comment_id, keyword, now, now),
+        )
+        con.execute(
+            """
+            INSERT INTO outbound_messages(platform,source_type,source_id,recipient_id,message_type,message_text,meta_response_id,status)
+            VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (platform, "comment", comment_id, comment_id, "private_reply", dm_text, dm_response.get("message_id") or dm_response.get("id") or dm_response.get("recipient_id"), "sent"),
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    finally:
+        con.close()
+
+
+def persist_public_after_dm(*, platform: str, comment_id: str, media_id: str | None, public_text: str, public_response: dict[str, Any]) -> None:
+    now = utc_now()
+    con = _immediate()
+    try:
+        con.execute(
+            "UPDATE processed_comments SET status='processed',public_reply_sent=1,dm_sent=1,processed_at=?,error_message=NULL WHERE platform=? AND comment_id=?",
+            (now, platform, comment_id),
+        )
+        con.execute(
+            """
+            UPDATE comment_review_items
+            SET status='replied', media_id=COALESCE(media_id,?), posted_reply_id=?, reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+            WHERE platform=? AND comment_id=?
+            """,
+            (media_id, public_response.get("id"), platform, comment_id),
+        )
+        con.execute(
+            """
+            INSERT INTO outbound_messages(platform,source_type,source_id,recipient_id,message_type,message_text,meta_response_id,status)
+            VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (platform, "comment", comment_id, comment_id, "public_reply", public_text, public_response.get("id"), "sent"),
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    finally:
+        con.close()
+
+
+def persist_follow_gate_prompt(*, platform: str, comment_id: str, sender_id: str, campaign: str, keyword: str, dm_text: str, prompt_response: dict[str, Any]) -> None:
+    now = utc_now()
+    con = _immediate()
+    try:
+        con.execute(
+            """
+            INSERT INTO follow_gates(platform,comment_id,sender_id,campaign,keyword,dm_text,status,created_at,updated_at)
+            VALUES(?,?,?,?,?,?,'awaiting_follow_confirm',?,?)
+            ON CONFLICT(platform,comment_id) DO UPDATE SET
+              sender_id=excluded.sender_id,campaign=excluded.campaign,keyword=excluded.keyword,dm_text=excluded.dm_text,
+              status=CASE WHEN follow_gates.status='unlocked' THEN follow_gates.status ELSE 'awaiting_follow_confirm' END,
+              updated_at=excluded.updated_at
+            """,
+            (platform, comment_id, sender_id, campaign, keyword, dm_text, now, now),
+        )
+        con.execute(
+            """
+            INSERT INTO processed_comments(platform,comment_id,keyword,status,like_sent,public_reply_sent,dm_sent,created_at,processed_at,error_message)
+            VALUES(?,?,?,'follow_gate_pending',0,0,0,?,?,NULL)
+            ON CONFLICT(platform,comment_id) DO UPDATE SET
+              keyword=excluded.keyword,status='follow_gate_pending',public_reply_sent=0,dm_sent=0,processed_at=excluded.processed_at,error_message=NULL
+            """,
+            (platform, comment_id, keyword, now, now),
+        )
+        con.execute(
+            """
+            INSERT INTO outbound_messages(platform,source_type,source_id,recipient_id,message_type,message_text,meta_response_id,status)
+            VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (platform, "comment", comment_id, sender_id, "follow_gate_prompt", FOLLOW_GATE_PROMPT, prompt_response.get("message_id") or prompt_response.get("id") or prompt_response.get("recipient_id"), "sent"),
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    finally:
+        con.close()
+
+
+def persist_public_after_follow_gate(*, platform: str, comment_id: str, media_id: str | None, public_text: str, public_response: dict[str, Any]) -> None:
+    now = utc_now()
+    con = _immediate()
+    try:
+        con.execute(
+            "UPDATE processed_comments SET status='follow_gate_pending',public_reply_sent=1,dm_sent=0,processed_at=?,error_message=NULL WHERE platform=? AND comment_id=?",
+            (now, platform, comment_id),
+        )
+        con.execute(
+            """
+            UPDATE comment_review_items
+            SET status='replied', media_id=COALESCE(media_id,?), posted_reply_id=?, suggested_reply=?, reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+            WHERE platform=? AND comment_id=?
+            """,
+            (media_id, public_response.get("id"), "follow_gate_pending", platform, comment_id),
+        )
+        con.execute(
+            """
+            INSERT INTO outbound_messages(platform,source_type,source_id,recipient_id,message_type,message_text,meta_response_id,status)
+            VALUES(?,?,?,?,?,?,?,?)
+            """,
+            (platform, "comment", comment_id, comment_id, "public_reply", public_text, public_response.get("id"), "sent"),
+        )
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    finally:
+        con.close()
+
+
+def persist_like(*, platform: str, comment_id: str) -> None:
+    con = sqlite3.connect(DB)
+    try:
+        con.execute("UPDATE processed_comments SET like_sent=1 WHERE platform=? AND comment_id=?", (platform, comment_id))
+        con.commit()
+    finally:
+        con.close()
+
+
 def persist_error(platform: str, comment_id: str, error: str) -> None:
     con = sqlite3.connect(DB)
     try:
@@ -481,9 +696,10 @@ async def process_pending_keyword_items() -> list[dict[str, Any]]:
         LIMIT 300
         """
     )
-    settings = get_settings()
+    _count("pending_read", len(pending))
+    settings = _settings()
     actions: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with _client() as client:
         for row in pending:
             rowd = dict(row)
             if rowd["platform"] == "facebook" and is_delivery_complaint(rowd.get("text") or ""):
@@ -516,14 +732,34 @@ async def process_pending_keyword_items() -> list[dict[str, Any]]:
                 media_id = (resolved.get("media") or {}).get("id") or media_id
             rule, keyword = find_rule(platform=rowd["platform"], media_id=media_id, text=text, rules=rules)
             if not rule or not keyword:
+                _count("unmatched")
                 continue
             already = db_rows("SELECT dm_sent,public_reply_sent,status FROM processed_comments WHERE platform=? AND comment_id=?", (rowd["platform"], rowd["comment_id"]))
             if already and already[0]["status"] in {"private_reply_blocked", "manual_review"}:
+                _count("already_processed")
                 continue
             if already and already[0]["public_reply_sent"] and (already[0]["dm_sent"] or already[0]["status"] in {"public_reply_only", "follow_gate_pending"}):
                 con = sqlite3.connect(DB)
                 con.execute("UPDATE comment_review_items SET status='replied', media_id=COALESCE(media_id,?), updated_at=CURRENT_TIMESTAMP WHERE platform=? AND comment_id=?", (media_id, rowd["platform"], rowd["comment_id"]))
                 con.commit(); con.close()
+                _count("already_processed")
+                continue
+            if already and not already[0]["public_reply_sent"] and (already[0]["dm_sent"] or already[0]["status"] == "follow_gate_pending"):
+                # P4: the DM / follow-gate prompt is already persisted, never send it again; only retry the public reply.
+                gate_pending = already[0]["status"] == "follow_gate_pending"
+                public_text = (
+                    FOLLOW_GATE_PUBLIC_REPLY_TEXT
+                    if gate_pending or rule.get("delivery_mode") == "follow_gate"
+                    else public_reply_for_platform(rowd["platform"], rule.get("public_reply_text"))
+                )
+                public = await send_public_reply(client, settings, rowd["platform"], rowd["comment_id"], public_text)
+                if "error" in public:
+                    err = public["error"].get("message") or str(public["error"])
+                    actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "ok": False, "stage": "public_failed_after_dm", "error": err})
+                    continue
+                persist_public = persist_public_after_follow_gate if gate_pending else persist_public_after_dm
+                persist_public(platform=rowd["platform"], comment_id=rowd["comment_id"], media_id=media_id, public_text=public_text, public_response=public)
+                actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "username": rowd.get("username"), "keyword": keyword, "media_id": media_id, "ok": True, "stage": "public_reply_after_dm"})
                 continue
             dm_text = rule["dm_text"]
             if dm_text == PUBLIC_REPLY_ONLY_DM_MARKER:
@@ -533,9 +769,11 @@ async def process_pending_keyword_items() -> list[dict[str, Any]]:
                     err = public["error"].get("message") or str(public["error"])
                     actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "ok": False, "stage": "public_only_failed", "error": err})
                     continue
+                persist_public_reply_only(platform=rowd["platform"], comment_id=rowd["comment_id"], keyword=keyword, media_id=media_id, public_text=public_text, public_response=public, like_ok=False)
                 like = await like_comment(client, settings, rowd["platform"], rowd["comment_id"])
                 like_ok = "error" not in like
-                persist_public_reply_only(platform=rowd["platform"], comment_id=rowd["comment_id"], keyword=keyword, media_id=media_id, public_text=public_text, public_response=public, like_ok=like_ok)
+                if like_ok:
+                    persist_like(platform=rowd["platform"], comment_id=rowd["comment_id"])
                 actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "username": rowd.get("username"), "keyword": keyword, "media_id": media_id, "ok": True, "stage": "public_reply_only", "reply_id": public.get("id"), "like_ok": like_ok})
                 continue
             public_text = (
@@ -595,12 +833,13 @@ async def process_pending_keyword_items() -> list[dict[str, Any]]:
                                 continue
                         actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "ok": False, "stage": "follow_gate_prompt_failed", "error": err})
                         continue
+                    persist_follow_gate_prompt(platform=rowd["platform"], comment_id=rowd["comment_id"], sender_id=sender_id, campaign=rule["source_task_id"], keyword=keyword, dm_text=dm_text, prompt_response=prompt)
                     public = await send_public_reply(client, settings, rowd["platform"], rowd["comment_id"], public_text)
                     if "error" in public:
                         err = public["error"].get("message") or str(public["error"])
                         actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "ok": False, "stage": "public_failed_after_follow_gate_prompt", "error": err})
                         continue
-                    persist_follow_gate_pending(platform=rowd["platform"], comment_id=rowd["comment_id"], sender_id=sender_id, campaign=rule["source_task_id"], keyword=keyword, media_id=media_id, dm_text=dm_text, public_text=public_text, prompt_response=prompt, public_response=public)
+                    persist_public_after_follow_gate(platform=rowd["platform"], comment_id=rowd["comment_id"], media_id=media_id, public_text=public_text, public_response=public)
                     actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "username": rowd.get("username"), "keyword": keyword, "media_id": media_id, "ok": True, "stage": "follow_gate_pending"})
                     continue
                 actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "ok": False, "stage": "follow_gate_missing_sender_id"})
@@ -616,12 +855,13 @@ async def process_pending_keyword_items() -> list[dict[str, Any]]:
                         continue
                 actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "ok": False, "stage": "dm_failed", "error": err})
                 continue
+            persist_dm_sent(platform=rowd["platform"], comment_id=rowd["comment_id"], keyword=keyword, dm_text=dm_text, dm_response=dm)
             public = await send_public_reply(client, settings, rowd["platform"], rowd["comment_id"], public_text)
             if "error" in public:
                 err = public["error"].get("message") or str(public["error"])
                 actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "ok": False, "stage": "public_failed_after_dm", "error": err})
                 continue
-            persist_success(platform=rowd["platform"], comment_id=rowd["comment_id"], keyword=keyword, media_id=media_id, dm_text=dm_text, public_text=public_text, dm_response=dm, public_response=public)
+            persist_public_after_dm(platform=rowd["platform"], comment_id=rowd["comment_id"], media_id=media_id, public_text=public_text, public_response=public)
             actions.append({"comment_id": rowd["comment_id"], "platform": rowd["platform"], "username": rowd.get("username"), "keyword": keyword, "media_id": media_id, "ok": True, "stage": "processed"})
     return actions
 
@@ -717,11 +957,11 @@ async def sweep_pending_follow_gates() -> list[dict[str, Any]]:
     )
     if not gates:
         return []
-    settings = get_settings()
+    settings = _settings()
     actions: list[dict[str, Any]] = []
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with _client() as client:
         for g in gates:
             g = dict(g)
             comment_id = g["comment_id"]
@@ -765,7 +1005,7 @@ async def sweep_pending_follow_gates() -> list[dict[str, Any]]:
                     )
                     data = r.json() if r.content else {}
                 except Exception as exc:  # network hiccup: leave pending, retry next cycle
-                    actions.append({"comment_id": comment_id, "ok": False, "stage": "unlock_network_error", "error": str(exc)[:200]})
+                    actions.append({"comment_id": comment_id, "ok": False, "stage": "unlock_network_error", "error": _scrub(str(exc))[:200]})
                     break
                 if r.status_code >= 400 or "error" in data:
                     # try the next recipient form (thread) on the next iteration
@@ -827,10 +1067,10 @@ def find_dm_rule(*, text: str, rules: list[dict[str, Any]]) -> tuple[dict[str, A
 
 async def process_recent_messenger_keyword_dms() -> list[dict[str, Any]]:
     rules = load_rules()
-    settings = get_settings()
+    settings = _settings()
     cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(hours=3)
     actions: list[dict[str, Any]] = []
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with _client() as client:
         r = await client.get(
             f"https://graph.facebook.com/{settings.graph_api_version}/{settings.meta_page_id}/conversations",
             params={
@@ -854,11 +1094,13 @@ async def process_recent_messenger_keyword_dms() -> list[dict[str, Any]]:
                 created = parse_graph_time(msg.get("created_time"))
                 if created and created < cutoff:
                     continue
+                _count("messenger_considered")
                 rule, keyword = find_dm_rule(text=text, rules=rules)
                 if not rule or not keyword:
                     continue
                 already = db_rows("SELECT 1 FROM processed_comments WHERE platform='facebook_dm' AND comment_id=?", (message_id,))
                 if already:
+                    _count("already_processed")
                     continue
                 dm_text = rule.get("dm_text") or ""
                 resp = await client.post(
@@ -887,57 +1129,123 @@ async def process_recent_messenger_keyword_dms() -> list[dict[str, Any]]:
                 actions.append({"ok": True, "stage": "messenger_keyword_dm_sent", "message_id": message_id, "keyword": keyword, "recipient_id": sender_id, "meta_response_id": mid})
     return actions
 
-async def main() -> None:
+async def scan_comments() -> tuple[bool, dict[str, Any]]:
+    """Graph scan, in process, on the repo's code (P5): enqueues review rows without sending."""
+    settings = _settings()
+    try:
+        owner_ids, owner_usernames = owner_identity_sets(settings)
+        rule_store = CampaignRuleStore(DB)
+        processed_store = ProcessedCommentStore(DB)
+        review_store = CommentReviewStore(DB)
+        async with _client() as http_client:
+            fetcher = MetaReviewScanFetcher(
+                access_token=settings.meta_page_access_token,
+                http_client=http_client,
+                api_version=settings.graph_api_version,
+                owner_usernames=owner_usernames,
+                owner_ids=owner_ids,
+            )
+            summary = await asyncio.wait_for(
+                run_scan_from_fetcher(
+                    fetcher=fetcher,
+                    platform="all",
+                    page_id=settings.meta_page_id,
+                    ig_user_id=settings.meta_ig_user_id,
+                    media_limit=10,
+                    comments_limit=200,
+                    rule_store=rule_store,
+                    processed_store=processed_store,
+                    review_store=review_store,
+                    interest_only_keywords=_csv_set(settings.interest_only_keywords),
+                ),
+                SCAN_TIMEOUT_SEC,
+            )
+    except Exception as exc:  # Graph error, network error, timeout: the run will exit 3
+        return False, {"ok": False, "error": f"{type(exc).__name__}: {_scrub(str(exc))[:300]}"}
+    return True, {"ok": True, **dataclasses.asdict(summary)}
+
+
+@dataclasses.dataclass(frozen=True)
+class BackfillResult:
+    report: dict[str, Any]
+    counters: dict[str, int]
+    scan_ok: bool
+
+
+def _scrub_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for action in actions:
+        if action.get("error") is not None:
+            action["error"] = _scrub(str(action["error"]))
+    return actions
+
+
+async def run_backfill() -> BackfillResult:
     report: dict[str, Any] = {"scan": None, "pending_keyword_actions": [], "messenger_dm_actions": []}
 
     # Normal Graph scan catches recent comments and enqueues review rows without sending.
     # Sending is done only by process_pending_keyword_items(), which checks processed_comments first.
-    p = sh([
-        "uv", "run", "python", "-m", "app.scan_comment_reviews",
-        "--platform", "all", "--media-limit", "10", "--comments-limit", "200",
-        "--db", str(DB),
-    ], timeout=300)
-    report["scan"] = {"ok": p.returncode == 0, "stdout": p.stdout.strip(), "stderr": p.stderr.strip()[-800:]}
+    scan_ok, report["scan"] = await scan_comments()
 
     # Fallback for webhook/review rows that entered the queue with media_id=NULL.
-    report["pending_keyword_actions"] = await process_pending_keyword_items()
+    report["pending_keyword_actions"] = _scrub_actions(await process_pending_keyword_items())
 
     # Messenger users who answered the public fallback ("message me first") can be
     # served directly from recent Page DMs.
-    report["messenger_dm_actions"] = await process_recent_messenger_keyword_dms()
+    report["messenger_dm_actions"] = _scrub_actions(await process_recent_messenger_keyword_dms())
 
     # Follow-gate auto-unlock. Facebook requires explicit conversation evidence;
     # Instagram unlocks are handled by verified realtime webhooks only, because
     # this app cannot read IG conversations without Advanced Access.
-    report["follow_gate_sweep"] = await sweep_pending_follow_gates()
+    report["follow_gate_sweep"] = _scrub_actions(await sweep_pending_follow_gates())
 
-    # Script-only cron delivery is local. Keep stdout quiet unless there was a
-    # real send/action/error. Routine skips / permanently bad old rows stay silent.
-    quiet_pending_stages = {
-        "resolve_failed",
-        "follow_gate_missing_sender_id",
-        "instagram_follow_gate_disabled",
-    }
-    quiet_sweep_stages = {
-        "unlock_skipped_no_confirmation_evidence",
-        "unlock_skipped_no_realtime_confirmation",
-    }
-    actionable_pending = [item for item in report["pending_keyword_actions"] if item.get("stage") not in quiet_pending_stages]
-    actionable_sweep = [item for item in report["follow_gate_sweep"] if item.get("stage") not in quiet_sweep_stages]
-    actionable_dms = report.get("messenger_dm_actions", [])
-    useful = bool(actionable_pending) or bool(actionable_sweep) or bool(actionable_dms)
-    scan_out = report["scan"]["stdout"] or ""
-    if "inserted_pending=" in scan_out:
-        try:
-            inserted = int(scan_out.split("inserted_pending=", 1)[1].splitlines()[0].strip())
-            useful = useful or inserted > 0
-        except Exception:
-            pass
-    if not report["scan"]["ok"]:
-        useful = True
-    if useful:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+    for key in ("pending_keyword_actions", "messenger_dm_actions", "follow_gate_sweep"):
+        for action in report[key]:
+            bucket = bucket_for(action)
+            if bucket:
+                _count(bucket)
+    # examined = comments read from Graph by this run's scan only (Q1-bis): the local queue is not in it.
+    scanned = int(report["scan"].get("scanned_comments", 0)) if scan_ok else 0
+    _COUNTERS["examined"] = _COUNTERS["scanned"] = scanned
+    _COUNTERS["inserted_pending"] = int(report["scan"].get("inserted_pending", 0)) if scan_ok else 0
+    counters = {key: _COUNTERS.get(key, 0) for key in COUNTER_KEYS}
+    return BackfillResult(report=report, counters=counters, scan_ok=scan_ok)
+
+
+REQUIRED_SETTINGS = ("meta_page_access_token", "meta_page_id", "meta_ig_user_id")
+
+
+def _invalid_config(param: str) -> int:
+    print(f"console: invalid_config {param}", file=sys.stderr)
+    return EXIT_INVALID_CONFIG
+
+
+def main(argv: list[str] | None = None, *, transport: httpx.AsyncBaseTransport | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Meta verification/backfill worker (hermes-console job meta-backfill)")
+    parser.add_argument("--env-file", required=True, help="Absolute path of the Meta .env file")
+    parser.add_argument("--db", required=True, help="Absolute path of processed_comments.sqlite3")
+    args = parser.parse_args(argv)
+
+    # Absolute, existing paths only, checked before any network call or database open (P2).
+    for param, value in (("--env-file", args.env_file), ("--db", args.db)):
+        path = Path(value)
+        if not path.is_absolute() or not path.is_file():
+            return _invalid_config(param)
+    settings = Settings(_env_file=args.env_file)
+    for field in REQUIRED_SETTINGS:
+        if not getattr(settings, field):
+            return _invalid_config(field)
+
+    configure(Path(args.db), settings, transport)
+    print(f"console: db={args.db} env_file={args.env_file}")
+    result = asyncio.run(run_backfill())
+
+    print("report " + json.dumps(result.report, ensure_ascii=False, separators=(",", ":")))
+    print("counters " + " ".join(f"{key}={value}" for key, value in result.counters.items()))
+    if not result.scan_ok:
+        return EXIT_SCAN_FAILED
+    print("CONSOLE_RESULT " + json.dumps({"status": "ok", "counters": result.counters}, separators=(",", ":")))
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(main())
