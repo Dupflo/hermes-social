@@ -67,6 +67,8 @@ def test_mask_covers_username_and_every_password_field():
     ):
         assert selector in js
     assert "-webkit-text-security" in js and "transparent" in js
+    # Review m3: on Firefox (Camoufox) a page-set -webkit-text-fill-color wins over `color`.
+    assert "setProperty('-webkit-text-fill-color', 'transparent', 'important')" in js
     assert "return" in js
 
 

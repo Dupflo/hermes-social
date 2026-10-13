@@ -571,6 +571,27 @@ def test_code_file_deleted_before_typing(tmp_path):
     assert states == [False, False]
 
 
+def test_code_file_that_cannot_be_deleted_is_never_typed_twice(monkeypatch, tmp_path):
+    # Review m4: if unlink of the code file fails, the same code must not be re-read and re-typed next round.
+    real_unlink = os.unlink
+
+    def unlink(path, *args, **kwargs):
+        if str(path).endswith(".code"):
+            raise PermissionError("denied")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(tiktok_login.os, "unlink", unlink)
+    typed = []
+
+    def on_type(selector, text):
+        if selector == CODE_INPUT_SELECTOR:
+            typed.append(text)
+
+    result, _, _, _ = run("code_rejected_then_accepted", tmp_path, run_id=42, on_type=on_type)
+    assert typed == ["111111", "482917"]
+    assert result.reason == "connected"
+
+
 def test_heartbeat_keeps_the_tab_alive_during_the_whole_wait(tmp_path):
     result, client, _, _ = run("code_timeout", tmp_path, run_id=42)
     assert result.reason == "code_timeout"

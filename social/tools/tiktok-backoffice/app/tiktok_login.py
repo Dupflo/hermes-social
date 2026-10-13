@@ -175,6 +175,8 @@ class _Login:
         self.wait_started: float | None = None
         self.tab: str | None = None
         self.form_seen = False
+        # A code whose file could not be deleted: never re-read and re-typed (review m4). Never logged.
+        self.undeleted_code: str | None = None
         self.counters = {
             "attempted": 0,
             "screenshot_at": 0,
@@ -432,7 +434,11 @@ class _Login:
         os.replace(tmp, final)
 
     def take_code(self) -> str | None:
-        """Read the code file then delete it BEFORE anything is typed. Never logged."""
+        """Read the code file then delete it BEFORE anything is typed. Never logged.
+
+        If the file cannot be deleted, its code is remembered and an identical read is skipped afterwards, so a
+        stale file is never typed twice (a new code from the console replaces the file and differs).
+        """
         assert self.run_id is not None
         path = self._channel_path(code_name(self.run_id))
         try:
@@ -440,11 +446,17 @@ class _Login:
                 raw = handle.read(64)
         except OSError:
             return None
+        code = raw.decode("ascii", "replace").strip()
         try:
             os.unlink(path)
+            deleted = True
         except OSError:
-            pass
-        return raw.decode("ascii", "replace").strip()
+            deleted = False
+        if self.undeleted_code is not None and code == self.undeleted_code:
+            return None  # the same undeletable file, already consumed
+        if not deleted:
+            self.undeleted_code = code
+        return code
 
     def heartbeat(self) -> None:
         try:

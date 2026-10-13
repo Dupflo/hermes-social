@@ -67,6 +67,7 @@ MASK_SECRETS_JS = (
     " if (seen.has(el)) continue; seen.add(el);"
     " el.style.setProperty('-webkit-text-security', 'disc', 'important');"
     " el.style.setProperty('color', 'transparent', 'important');"
+    " el.style.setProperty('-webkit-text-fill-color', 'transparent', 'important');"
     " n += 1;"
     " }"
     " }"
