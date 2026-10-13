@@ -1,0 +1,15 @@
+{
+  "description": "captcha wrapper shown but no known variant",
+  "facts": {
+    "present": true,
+    "puzzle_v1": false,
+    "puzzle_v2": false,
+    "rotate_v1": false,
+    "rotate_v2": false,
+    "submit_v1": false,
+    "submit_v2": false,
+    "img_src_kind": "other",
+    "challenge": ""
+  },
+  "expected": null
+}

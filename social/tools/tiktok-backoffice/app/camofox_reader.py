@@ -386,6 +386,28 @@ class CamofoxClient:
             raise ValueError("unexpected screenshot payload")
         return data
 
+    # --- s22 (console ADR 053): console-mouse plugin. Trusted Playwright mouse gestures; typed errors only.
+
+    def mouse(self, tab_id: str, actions: list[dict[str, Any]], *, hold: bool = False, timeout: float = 25.0) -> int:
+        response = self._request_json(
+            "POST",
+            self._tab_path(tab_id, "mouse"),
+            {"userId": self.user_id, "actions": actions, "hold": bool(hold)},
+            timeout=timeout,
+        )
+        performed = response.get("performed") if isinstance(response, dict) else None
+        if not isinstance(response, dict) or response.get("ok") is not True or type(performed) is not int:
+            raise ValueError("unexpected mouse payload")
+        return performed
+
+    def mouse_available(self, *, timeout: float = 5.0) -> bool:
+        """Probe of the console-mouse plugin. 404 (not loaded), 403, unreachable or odd payload ⇒ False."""
+        try:
+            response = self._request_json("GET", "/console-mouse/health", timeout=timeout)
+        except (CamofoxError, ValueError):
+            return False
+        return isinstance(response, dict) and response.get("ok") is True and response.get("plugin") == "console-mouse"
+
     def create_tab(self, *, session_key: str, url: str) -> str:
         response = self._request_json("POST", "/tabs", {"userId": self.user_id, "sessionKey": session_key, "url": url})
         tab_id = response.get("tabId")

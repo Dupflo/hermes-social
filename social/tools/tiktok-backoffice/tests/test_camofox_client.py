@@ -330,3 +330,79 @@ def test_screenshot_http_error_is_typed(server):
     with pytest.raises(CamofoxHTTPError) as info:
         CamofoxClient(base_url=base).screenshot("t")
     assert info.value.status == 404 and "BODYMARKER" not in str(info.value)
+
+
+# --- s22 (console ADR 053): console-mouse plugin routes.
+
+
+def test_mouse_body_hold_default_and_bearer(server):
+    recorder, base = server
+    recorder.responses[("POST", "/tabs/tab-1/mouse")] = (200, {"ok": True, "performed": 2})
+    client = CamofoxClient(base_url=base, user_id="hermes_x", api_key="k-123")
+    actions = [{"type": "move", "x": 1, "y": 2}, {"type": "down"}]
+    assert client.mouse("tab-1", actions) == 2
+    assert client.mouse("tab-1", actions, hold=True) == 2
+    first, second = recorder.requests
+    assert first["path"] == "/tabs/tab-1/mouse"
+    assert first["body"] == {"userId": "hermes_x", "actions": actions, "hold": False}
+    assert second["body"] == {"userId": "hermes_x", "actions": actions, "hold": True}
+    assert first["headers"].get("authorization") == "Bearer k-123"
+
+
+def test_mouse_default_timeout_is_25():
+    assert inspect.signature(CamofoxClient.mouse).parameters["timeout"].default == 25.0
+
+
+def test_mouse_404_is_typed_without_body_or_key(server):
+    recorder, base = server
+    recorder.responses[("POST", "/tabs/tab-1/mouse")] = (404, {"error": "tab_not_found BODYSECRET"})
+    with pytest.raises(CamofoxHTTPError) as info:
+        CamofoxClient(base_url=base, api_key="KEYSECRET").mouse("tab-1", [{"type": "up"}])
+    assert info.value.status == 404
+    assert "BODYSECRET" not in str(info.value) and "KEYSECRET" not in str(info.value)
+    assert "BODYSECRET" not in repr(info.value) and "KEYSECRET" not in repr(info.value)
+
+
+@pytest.mark.parametrize("payload", [{"ok": False}, {"ok": True}, {"ok": True, "performed": "2"}, ["x"]])
+def test_mouse_unexpected_payload_is_value_error(server, payload):
+    recorder, base = server
+    recorder.responses[("POST", "/tabs/tab-1/mouse")] = (200, payload)
+    with pytest.raises(ValueError) as info:
+        CamofoxClient(base_url=base).mouse("tab-1", [{"type": "up"}])
+    assert str(info.value) == "unexpected mouse payload"
+
+
+def test_mouse_available_true_on_plugin_health(server):
+    recorder, base = server
+    recorder.responses[("GET", "/console-mouse/health")] = (200, {"ok": True, "plugin": "console-mouse", "version": 1})
+    assert CamofoxClient(base_url=base, api_key="k").mouse_available() is True
+    assert recorder.requests[0]["headers"].get("authorization") == "Bearer k"
+
+
+def test_mouse_available_default_timeout_is_5():
+    assert inspect.signature(CamofoxClient.mouse_available).parameters["timeout"].default == 5.0
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        (404, {"error": "not found"}),
+        (403, {"error": "forbidden"}),
+        (500, {"error": "x"}),
+        (200, {"ok": True}),
+        (200, {"ok": True, "plugin": "other"}),
+        (200, {"ok": False, "plugin": "console-mouse"}),
+        (200, b"not json", "text/plain"),
+    ],
+)
+def test_mouse_available_false_otherwise(server, response):
+    recorder, base = server
+    recorder.responses[("GET", "/console-mouse/health")] = response
+    assert CamofoxClient(base_url=base).mouse_available() is False
+
+
+def test_mouse_available_false_when_server_is_down():
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    assert CamofoxClient(base_url=f"http://127.0.0.1:{port}").mouse_available(timeout=1) is False

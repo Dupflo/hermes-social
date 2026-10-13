@@ -87,6 +87,8 @@ services:
     volumes:
       - ./camofox-data:/root/.camofox
       - ./camofox.config.json:/app/camofox.config.json:ro
+      # s22 : sous-répertoire seulement, monter sur /app/plugins masquerait persistence/vnc/youtube
+      - ./camofox-plugins/console-mouse:/app/plugins/console-mouse:ro
 
 networks:
   # Created by this project (deploy hermes-social before the console), joined

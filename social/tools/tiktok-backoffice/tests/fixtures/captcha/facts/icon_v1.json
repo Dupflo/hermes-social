@@ -1,0 +1,15 @@
+{
+  "description": "v1 submit button, image src under /icon",
+  "facts": {
+    "present": true,
+    "puzzle_v1": false,
+    "puzzle_v2": false,
+    "rotate_v1": false,
+    "rotate_v2": false,
+    "submit_v1": true,
+    "submit_v2": false,
+    "img_src_kind": "icon",
+    "challenge": "Which of these objects has a brim?"
+  },
+  "expected": "icon_v1"
+}

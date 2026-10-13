@@ -20,7 +20,15 @@ Outcomes (ADR 011 contract, console ADR 050 §6):
 - nothing attempted => `skipped` + already_connected | credentials_missing | camofox_down |
   camofox_auth_missing | camofox_auth_rejected (+ would_attempt, with the diagnostic `--check-only` only);
 - unexpected => exit 14 (unexpected Camofox response or deadline), 15 (tabs saturated), 16 (internal error),
-  without CONSOLE_RESULT.
+  with a last-line CONSOLE_RESULT only if captchas were met (its `status` carries no meaning: the exit code
+  wins, console ADR 011/052).
+
+Captchas (s22, console ADR 052/053): at each of the three probe points (before the form, after the submit, after
+the code), a captcha goes to app.captcha_solver.solve_captcha, with SADCAPTCHA_API_KEY from this process
+environment (vault through the exec Env, else deploy/.env; never printed). The solver has its own budget
+(SOLVER_BUDGET_S per run, suspended from DEADLINE_S like the code wait) and at most MAX_CAPTCHAS_PER_RUN captchas
+are handled. A solved captcha resumes the login; otherwise the attempt concludes `captcha_required`. Every
+captcha met is reported in CONSOLE_RESULT under the `captchas` key (ADR 052 format), on every outcome.
 
 Before every screenshot, the identifier, password and code fields are masked (MASK_SECRETS_JS); a failed mask
 means no screenshot. Secret hygiene: the output holds names and numbers only, never the identifier, the
@@ -32,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -39,6 +48,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, TextIO
 
 from app.camofox_reader import CamofoxClient, CamofoxError, CamofoxHTTPError, CamofoxUnreachable
+from app.captcha_solver import CaptchaReport, solve_captcha
 from app.session_check import session_cookies_present
 from app.tiktok_login_selectors import (
     CODE_INPUT_SELECTOR,
@@ -69,6 +79,8 @@ CODE_WAIT_MIN_S = 120
 CODE_WAIT_MAX_S = 600
 HEARTBEAT_S = 30.0  # Camofox closes a tab after 5 min without toolCalls; evaluate counts, screenshot does not
 MAX_CODE_ROUNDS = 3
+SOLVER_BUDGET_S = 240.0  # s22 (console ADR 053): solver time per run, suspended from DEADLINE_S
+MAX_CAPTCHAS_PER_RUN = 3
 
 EXIT_UNEXPECTED = 14
 EXIT_TABS_FULL = 15
@@ -161,6 +173,9 @@ class _Login:
         screenshots_dir: str,
         run_id: int | None,
         check_only: bool,
+        captcha_report: CaptchaReport | None = None,
+        solver: Callable[..., str] | None = None,
+        rng: random.Random | None = None,
     ) -> None:
         self.client = client
         self.env = env
@@ -177,6 +192,11 @@ class _Login:
         self.form_seen = False
         # A code whose file could not be deleted: never re-read and re-typed (review m4). Never logged.
         self.undeleted_code: str | None = None
+        # s22: captchas met by this run (reported in CONSOLE_RESULT) and the solver's own budget.
+        self.captcha_report = captcha_report if captcha_report is not None else CaptchaReport()
+        self.solver = solver if solver is not None else solve_captcha
+        self.rng = rng if rng is not None else random.Random()
+        self.solver_used_s = 0.0
         self.counters = {
             "attempted": 0,
             "screenshot_at": 0,
@@ -185,6 +205,9 @@ class _Login:
             "storage_saved": 0,
             "tab_close_failed": 0,
             "codes_ignored": 0,
+            "captchas": 0,
+            "captchas_solved": 0,
+            "captcha_tries": 0,
         }
 
     # --- time -------------------------------------------------------------------------------------------------
@@ -254,6 +277,42 @@ class _Login:
             return
         self.counters["screenshot_at"] = at
         purge_screenshots(self.screenshots_dir)
+
+    # --- captchas (s22) -----------------------------------------------------------------------------------------
+
+    def handle_captcha(self) -> bool:
+        """Hand the captcha to the solver, its time suspended from DEADLINE_S. True only if solved."""
+        if len(self.captcha_report.captchas) >= MAX_CAPTCHAS_PER_RUN:
+            return False
+        began = self.clock()
+        pausing = self.wait_started is None  # already suspended while waiting for the code
+        if pausing:
+            self.wait_started = began
+        try:
+            outcome = self.solver(
+                self.client,
+                self.tab,
+                api_key=self.env.get("SADCAPTCHA_API_KEY") or "",
+                report=self.captcha_report,
+                clock=self.clock,
+                sleep=self.sleep,
+                rng=self.rng,
+                deadline=began + max(0.0, SOLVER_BUDGET_S - self.solver_used_s),
+            )
+        finally:
+            spent = self.clock() - began
+            self.solver_used_s += spent
+            if pausing:
+                self.paused_s += spent
+                self.wait_started = None
+            self.count_captchas()
+        return outcome == "solved"
+
+    def count_captchas(self) -> None:
+        captchas = self.captcha_report.captchas
+        self.counters["captchas"] = len(captchas)
+        self.counters["captchas_solved"] = sum(1 for c in captchas if c.get("outcome") == "solved")
+        self.counters["captcha_tries"] = sum(len(c.get("attempts") or []) for c in captchas)
 
     def conclude(self, reason: str) -> Result:
         if reason != "connected":
@@ -362,10 +421,13 @@ class _Login:
             raise _Outcome("login_unknown") from None
 
         probe = self.probe()
+        while probe is not None and probe["captcha"]:
+            if not self.handle_captcha():
+                raise _Outcome("captcha_required")
+            self.sleep(POLL_S)
+            probe = self.probe()
         if probe is None:
             raise _Outcome("login_unknown")
-        if probe["captcha"]:
-            raise _Outcome("captcha_required")
         if not probe["form"]:
             raise _Outcome("login_unknown")
         try:
@@ -386,7 +448,10 @@ class _Login:
             if probe is None:
                 continue
             if probe["captcha"]:
-                raise _Outcome("captcha_required")
+                if not self.handle_captcha():
+                    raise _Outcome("captcha_required")
+                waited = 0.0  # a solved captcha opens a new polling window
+                continue
             if probe["code_screen"]:
                 return self.code_screen()
             if probe["bad_credentials"]:
@@ -479,7 +544,10 @@ class _Login:
             if probe is None:
                 continue
             if probe["captcha"]:
-                return "captcha_required"
+                if not self.handle_captcha():
+                    return "captcha_required"
+                waited = 0.0
+                continue
             if probe["code_screen"]:
                 if probe["code_error"]:
                     return "rejected"
@@ -553,6 +621,9 @@ def login(
     screenshots_dir: str = SCREENSHOTS_DIR,
     run_id: int | None = None,
     check_only: bool = False,
+    captcha_report: CaptchaReport | None = None,
+    solver: Callable[..., str] | None = None,
+    rng: random.Random | None = None,
 ) -> Result:
     return _Login(
         client,
@@ -563,6 +634,10 @@ def login(
         screenshots_dir=screenshots_dir,
         run_id=run_id,
         check_only=check_only,
+        captcha_report=captcha_report,
+        # Resolved at call time, so tests can replace the module's solve_captcha.
+        solver=solver if solver is not None else solve_captcha,
+        rng=rng,
     ).run()
 
 
@@ -582,6 +657,22 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ,
         out.write(line + "\n")
         out.flush()
 
+    report = CaptchaReport()
+
+    def emit_report(reason: str, counters: dict[str, int]) -> None:
+        # s22 (console ADR 052 §2): on exit 14/15/16 the captchas met still reach the console, in the LAST line.
+        if not report.captchas:
+            return
+        payload = {"status": "ok", "reason": reason, "counters": counters, "captchas": report.to_json()}
+        emit("CONSOLE_RESULT " + json.dumps(payload, separators=(",", ":")))
+
+    def captcha_counters() -> dict[str, int]:
+        return {
+            "captchas": len(report.captchas),
+            "captchas_solved": sum(1 for c in report.captchas if c.get("outcome") == "solved"),
+            "captcha_tries": sum(len(c.get("attempts") or []) for c in report.captchas),
+        }
+
     try:
         parser = argparse.ArgumentParser(prog="python -m app.tiktok_login")
         parser.add_argument("--check-only", action="store_true")
@@ -597,6 +688,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ,
                 screenshots_dir=SCREENSHOTS_DIR,
                 run_id=_run_id(environ),
                 check_only=args.check_only,
+                captcha_report=report,
             )
         finally:
             os.umask(previous_umask)
@@ -604,10 +696,13 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ,
         raise
     except BaseException as exc:  # noqa: BLE001 - class name only, never the message
         emit(f"tiktok-login: error=internal class={type(exc).__name__}")
+        emit_report("internal", captcha_counters())
         return EXIT_INTERNAL
 
     if result.exit_code:
-        emit(f"tiktok-login: error={_ERROR_NAMES.get(result.exit_code, 'unknown')}")
+        name = _ERROR_NAMES.get(result.exit_code, "unknown")
+        emit(f"tiktok-login: error={name}")
+        emit_report(name, dict(result.counters))
         return result.exit_code
 
     c = result.counters
@@ -617,7 +712,9 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ,
         f" screenshot={1 if c.get('screenshot_at') else 0}"
         f" rounds={c.get('code_rounds', 0)}"
     )
-    payload = {"status": result.status, "reason": result.reason, "counters": c}
+    payload: dict[str, Any] = {"status": result.status, "reason": result.reason, "counters": c}
+    if report.captchas:
+        payload["captchas"] = report.to_json()
     emit("CONSOLE_RESULT " + json.dumps(payload, separators=(",", ":")))
     return 0
 

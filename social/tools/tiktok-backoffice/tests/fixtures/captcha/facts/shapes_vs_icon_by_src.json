@@ -1,0 +1,15 @@
+{
+  "description": "same submit button: neither /3d nor /icon in the src falls back to shapes (upstream order)",
+  "facts": {
+    "present": true,
+    "puzzle_v1": false,
+    "puzzle_v2": false,
+    "rotate_v1": false,
+    "rotate_v2": false,
+    "submit_v1": true,
+    "submit_v2": false,
+    "img_src_kind": "other",
+    "challenge": ""
+  },
+  "expected": "shapes_v1"
+}

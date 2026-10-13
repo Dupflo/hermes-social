@@ -22,6 +22,10 @@ Browser-based TikTok comment automation using Camofox.
 | `app/tiktok_login.py` | TikTok login for the hermes-console job `tiktok-login` (`python -m app.tiktok_login`, s21) |
 | `app/tiktok_login_selectors.py` | The only module that knows the TikTok login DOM (URL, selectors, passive probe, masking) |
 | `scripts/console-tiktok-login.sh` | Wrapper of the login, run by the console worker (arguments forwarded) |
+| `app/captcha_solver.py` | TikTok captcha solver, `solve_captcha` (s22, reusable by the scan) |
+| `app/captcha_selectors.py` | The only module that knows the captcha DOM (8 variants, passive page scripts) |
+| `app/captcha_geometry.py` | Pure identification and SadCaptcha answer → mouse gesture conversion |
+| `app/sadcaptcha.py` | SadCaptcha HTTP client (stdlib, key never printed) |
 | `scripts/tiktok_cron_auto_dm.py` | Main cron worker (scan + DM) |
 | `tests/` | Pytest test suite |
 
@@ -118,6 +122,38 @@ Environment:
 
 Selectors could not be checked against the real TikTok page: an unrecognised page ends `login_unknown` with a
 masked screenshot, and `app/tiktok_login_selectors.py` is the only file to fix.
+
+## Captchas (s22, hermes-console ADR 052/053)
+
+When a probe of the login sees a captcha (before the form, after the submit, after the code), the login hands it
+to `app.captcha_solver.solve_captcha`:
+
+- **Key**: `SADCAPTCHA_API_KEY`, vault value injected by the console into the exec `Env`, else `deploy/.env`.
+  Absent from both ⇒ solver disabled: the captcha is logged `disabled` and the login concludes
+  `captcha_required` (manual login in the console Navigator), without error. To switch the solver off, remove the
+  key from both. The key travels in the SadCaptcha URL: it is never printed, nor any URL or exception message.
+- **Gestures**: trusted Playwright mouse events through the Camofox plugin `console-mouse`
+  (`deploy/camofox-plugins/console-mouse`, mounted as its own sub-directory
+  `./camofox-plugins/console-mouse:/app/plugins/console-mouse:ro` — never on `/app/plugins`, which would hide the
+  image's persistence/vnc/youtube plugins — and declared in `deploy/camofox.config.json`). It is only loaded after
+  camofox is recreated. Before any paid call, the solver probes `GET /console-mouse/health`
+  (`CamofoxClient.mouse_available`): 404 (plugin not loaded), 403 or unreachable ⇒ `unavailable`, manual login.
+- **Bounds**: at most 3 tries per captcha and 3 captchas per run; a budget of `SOLVER_BUDGET_S` = 240 s per run,
+  suspended from the 180 s login deadline; a try only starts with ≥ 60 s left. A SadCaptcha error stops solving
+  for the whole run (no retry). The page is never reloaded; rotate v2 uses the captcha's own refresh button.
+- **Outcomes** of a captcha: `solved` | `unsolved` (3 failed tries, or budget out after ≥ 1 try) |
+  `unrecognized` (no known variant: never a random click) | `disabled` | `unavailable` | `service_error`.
+  Result of a try: `solved` | `failed` | `unrecognized`.
+- **Report**: every captcha met goes into `CONSOLE_RESULT` under the key `captchas`
+  (`[{seq, outcome, at, attempts: [{try, type, variant, result, ms}]}]`, ≤ 5 captchas, ≤ 3 tries — format of the
+  console ADR 052), plus the counters `captchas`, `captchas_solved` and `captcha_tries`. On exit 14/15/16 the line
+  is still emitted, last, when captchas were met; its `status` is meaningless (the exit code wins). The console
+  worker stores it in `console.sqlite3` (7-day success rate, alert under 80 %).
+- **Reuse (s23)**: `solve_captcha(client, tab_id, *, api_key, report, clock, sleep, rng, deadline)` knows nothing
+  of the login; the scan can call it as is.
+
+The captcha selectors (official client of 2026-09-25) could not be checked against the real TikTok:
+`app/captcha_selectors.py` is the only file to fix.
 
 ## Security
 

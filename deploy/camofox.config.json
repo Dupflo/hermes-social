@@ -15,6 +15,9 @@
     "vnc": {
       "enabled": false,
       "resolution": "1920x1080"
+    },
+    "console-mouse": {
+      "enabled": true
     }
   }
 }

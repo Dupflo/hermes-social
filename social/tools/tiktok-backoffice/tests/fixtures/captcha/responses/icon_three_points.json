@@ -1,0 +1,43 @@
+{
+  "kind": "icon",
+  "response": {
+    "proportionalPoints": [
+      {
+        "proportionX": 0.1,
+        "proportionY": 0.2
+      },
+      {
+        "proportionX": 0.5,
+        "proportionY": 0.5
+      },
+      {
+        "proportionX": 1,
+        "proportionY": 0
+      }
+    ]
+  },
+  "geometry": {
+    "box": {
+      "x": 10,
+      "y": 20,
+      "width": 300,
+      "height": 200
+    }
+  },
+  "expected": {
+    "points": [
+      [
+        40.0,
+        60.0
+      ],
+      [
+        160.0,
+        120.0
+      ],
+      [
+        310.0,
+        20.0
+      ]
+    ]
+  }
+}

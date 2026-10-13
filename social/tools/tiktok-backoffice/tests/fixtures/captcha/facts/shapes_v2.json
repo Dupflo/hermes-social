@@ -1,0 +1,15 @@
+{
+  "description": "v2 submit button, image src under /3d",
+  "facts": {
+    "present": true,
+    "puzzle_v1": false,
+    "puzzle_v2": false,
+    "rotate_v1": false,
+    "rotate_v2": false,
+    "submit_v1": false,
+    "submit_v2": true,
+    "img_src_kind": "3d",
+    "challenge": ""
+  },
+  "expected": "shapes_v2"
+}

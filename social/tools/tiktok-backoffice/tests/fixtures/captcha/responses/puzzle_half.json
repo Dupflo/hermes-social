@@ -1,0 +1,12 @@
+{
+  "kind": "puzzle",
+  "response": {
+    "slideXProportion": 0.5
+  },
+  "geometry": {
+    "image_width": 340
+  },
+  "expected": {
+    "distance": 170
+  }
+}

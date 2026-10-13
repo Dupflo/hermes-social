@@ -1,0 +1,54 @@
+{
+  "description": "s22: captcha before the form, solved, then the form and connected.",
+  "storage_states": [
+    [],
+    [
+      {
+        "name": "sessionid",
+        "domain": ".tiktok.com",
+        "value": "fixture-session",
+        "expires": -1
+      },
+      {
+        "name": "sid_tt",
+        "domain": ".tiktok.com",
+        "value": "fixture-sid",
+        "expires": -1
+      }
+    ]
+  ],
+  "probes": [
+    {
+      "form": false,
+      "captcha": true,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    },
+    {
+      "form": true,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    },
+    {
+      "form": false,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    }
+  ],
+  "mask_count": 2,
+  "screenshot_b64": "iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "solver_outcomes": [
+    "solved"
+  ],
+  "expected": {
+    "status": "ok",
+    "reason": "connected",
+    "attempted": 1,
+    "code_rounds": 0
+  }
+}

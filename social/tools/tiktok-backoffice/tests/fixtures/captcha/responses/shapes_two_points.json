@@ -1,0 +1,29 @@
+{
+  "kind": "shapes",
+  "response": {
+    "pointOneProportionX": 0.25,
+    "pointOneProportionY": 0.5,
+    "pointTwoProportionX": 0.75,
+    "pointTwoProportionY": 0.1
+  },
+  "geometry": {
+    "box": {
+      "x": 100,
+      "y": 200,
+      "width": 340,
+      "height": 212
+    }
+  },
+  "expected": {
+    "points": [
+      [
+        185.0,
+        306.0
+      ],
+      [
+        355.0,
+        221.2
+      ]
+    ]
+  }
+}

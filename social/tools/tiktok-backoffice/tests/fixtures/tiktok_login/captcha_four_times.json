@@ -1,0 +1,35 @@
+{
+  "description": "s22: a captcha comes back after each success; the 4th one ends captcha_required (3 per run).",
+  "storage_states": [
+    []
+  ],
+  "probes": [
+    {
+      "form": true,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    },
+    {
+      "form": false,
+      "captcha": true,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    }
+  ],
+  "mask_count": 2,
+  "screenshot_b64": "iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "solver_outcomes": [
+    "solved",
+    "solved",
+    "solved"
+  ],
+  "expected": {
+    "status": "ok",
+    "reason": "captcha_required",
+    "attempted": 1,
+    "code_rounds": 0
+  }
+}

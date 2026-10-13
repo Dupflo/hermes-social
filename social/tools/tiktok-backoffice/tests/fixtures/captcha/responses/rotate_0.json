@@ -1,0 +1,13 @@
+{
+  "kind": "rotate",
+  "response": {
+    "angle": 0
+  },
+  "geometry": {
+    "bar_width": 340,
+    "handle_width": 64
+  },
+  "expected": {
+    "distance": 0
+  }
+}

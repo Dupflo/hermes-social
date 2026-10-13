@@ -22,8 +22,18 @@ EXPECTED_FIXTURES = {
     "code_timeout",
     "form_missing",
     "captcha_before_form",
+    # s22 : épingle amendée (fixtures du solveur de captchas, console ADR 053)
+    "captcha_before_form_solved",
+    "form_then_captcha_solved",
+    "form_then_captcha_unsolved",
+    "code_then_captcha_solved",
+    "captcha_four_times",
 }
-FIXTURE_KEYS = {"description", "storage_states", "probes", "mask_count", "screenshot_b64", "codes", "expected"}
+# s22 : épingle amendée (solver_outcomes : issues rendues par le faux solveur)
+FIXTURE_KEYS = {
+    "description", "storage_states", "probes", "mask_count", "screenshot_b64", "codes", "solver_outcomes", "expected",
+}
+SOLVER_OUTCOMES = {"solved", "unsolved", "unrecognized", "disabled", "unavailable", "service_error"}
 PROBE_KEYS = {"form", "captcha", "code_screen", "bad_credentials", "code_error"}
 EXPECTED_KEYS = {"status", "reason", "attempted", "code_rounds"}
 COOKIE_KEYS = {"name", "domain", "value", "expires"}
@@ -88,3 +98,5 @@ def test_every_fixture_loads_with_known_keys_only():
                 assert set(cookie) == COOKIE_KEYS, path.name
         for code in data.get("codes", []):
             assert re.fullmatch(r"\d{4,8}", code), path.name
+        for outcome in data.get("solver_outcomes", []):
+            assert outcome in SOLVER_OUTCOMES, path.name

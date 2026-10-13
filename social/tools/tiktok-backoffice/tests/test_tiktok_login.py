@@ -142,6 +142,14 @@ class FakeClient:
         self._log("screenshot")
         return self.png
 
+    # s22: probe of the console-mouse plugin, reached by the real solver only when a SadCaptcha key is set.
+    def mouse_available(self, *, timeout=5.0):
+        self._log("mouse_available")
+        return False
+
+    def mouse(self, *args, **kwargs):
+        raise AssertionError("no gesture in the login tests")
+
 
 def make_sleep(clock: Clock, runs_dir: Path | None = None, run_id: int | None = None, codes=None):
     """Advance simulated time; deliver one fixture code per new awaiting round, like the console worker would."""
@@ -694,3 +702,299 @@ def test_code_never_printed_when_an_exception_carries_it(monkeypatch, tmp_path, 
     captured = capsys.readouterr()
     assert "482917" not in captured.out + captured.err
     assert list(runs.iterdir()) == []
+
+
+# --- s22: captcha solver integration (console ADR 052/053) -----------------------------------------------------
+
+from app.captcha_solver import CaptchaReport  # noqa: E402
+
+KEY = "SADKEY-SENTINEL-123"
+CAPTCHA_FIXTURES = (
+    "captcha_before_form_solved",
+    "form_then_captcha_solved",
+    "form_then_captcha_unsolved",
+    "code_then_captcha_solved",
+    "captcha_four_times",
+)
+_ATTEMPTS = {
+    "solved": [{"try": 1, "type": "rotate", "variant": "v2", "result": "solved", "ms": 4200}],
+    "unsolved": [{"try": n, "type": "rotate", "variant": "v2", "result": "failed", "ms": 3000} for n in (1, 2, 3)],
+}
+
+
+def fake_solver(outcomes, *, seconds=0.0, calls=None):
+    """Stands for app.captcha_solver.solve_captcha: one captcha appended per call, `seconds` of simulated time."""
+    pending = list(outcomes)
+
+    def solver(client, tab_id, *, api_key, report, clock, sleep, rng, deadline, sadcaptcha=None):
+        if calls is not None:
+            calls.append({"tab": tab_id, "api_key": api_key, "deadline": deadline, "now": clock()})
+        outcome = pending.pop(0) if pending else "unsolved"
+        if seconds:
+            sleep(seconds)
+        report.captchas.append({
+            "seq": len(report.captchas) + 1,
+            "outcome": outcome,
+            "at": int(clock() * 1000),
+            "attempts": [dict(a) for a in _ATTEMPTS.get(outcome, [])],
+        })
+        return outcome
+
+    return solver
+
+
+def run_captcha(name, tmp_path, *, env=None, run_id=42, seconds=0.0, calls=None, solver=None, **client_kwargs):
+    fixture = load(name)
+    clock = Clock()
+    client = FakeClient(fixture, clock, **client_kwargs)
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir(exist_ok=True)
+    report = CaptchaReport()
+    result = login(
+        client,
+        dict(ENV, SADCAPTCHA_API_KEY=KEY) if env is None else env,
+        clock=clock,
+        sleep=make_sleep(clock, runs_dir, run_id, fixture.get("codes")),
+        runs_dir=str(runs_dir),
+        screenshots_dir=str(tmp_path / "shots"),
+        run_id=run_id,
+        check_only=False,
+        captcha_report=report,
+        solver=solver or fake_solver(fixture.get("solver_outcomes", []), seconds=seconds, calls=calls),
+    )
+    return result, client, report
+
+
+def test_solver_constants():
+    assert tiktok_login.SOLVER_BUDGET_S == 240.0
+    assert tiktok_login.MAX_CAPTCHAS_PER_RUN == 3
+    assert tiktok_login.DEADLINE_S == 180.0
+
+
+@pytest.mark.parametrize("name", CAPTCHA_FIXTURES)
+def test_captcha_fixture_outcome(name, tmp_path):
+    fixture = load(name)
+    expected = fixture["expected"]
+    result, client, report = run_captcha(name, tmp_path)
+    assert result.exit_code == 0
+    assert (result.status, result.reason) == (expected["status"], expected["reason"])
+    assert result.counters["attempted"] == expected["attempted"]
+    assert result.counters["code_rounds"] == expected["code_rounds"]
+    outcomes = fixture["solver_outcomes"]
+    assert [c["outcome"] for c in report.captchas] == outcomes
+    assert result.counters["captchas"] == len(outcomes)
+    assert result.counters["captchas_solved"] == outcomes.count("solved")
+    assert result.counters["captcha_tries"] == sum(len(c["attempts"]) for c in report.captchas)
+    names = client.names()
+    assert names.count("navigate") == 1
+    assert names[-1] == "delete_tab"
+
+
+def test_captcha_before_form_solved_types_the_form_after_the_solver(tmp_path):
+    calls = []
+    result, client, _ = run_captcha("captcha_before_form_solved", tmp_path, calls=calls)
+    assert result.reason == "connected"
+    assert calls and calls[0]["tab"] == "login-tab-1" and calls[0]["api_key"] == KEY
+    typed = [c[1] for c in client.calls if c[0] == "type_text"]
+    assert typed == [USERNAME_SELECTOR, PASSWORD_SELECTOR]
+
+
+def test_captcha_four_times_logs_three_then_concludes(tmp_path):
+    # Amendment 2: the ceiling is reached after a 3rd solved captcha => captcha_required (console cause `unsolved`).
+    calls = []
+    result, _, report = run_captcha("captcha_four_times", tmp_path, calls=calls)
+    assert result.reason == "captcha_required"
+    assert len(calls) == 3
+    assert [c["outcome"] for c in report.captchas] == ["solved", "solved", "solved"]
+    assert [c["seq"] for c in report.captchas] == [1, 2, 3]
+    assert result.counters["captchas_solved"] == 3
+
+
+def test_unsolved_captcha_takes_the_masked_screenshot(tmp_path):
+    result, client, _ = run_captcha("form_then_captcha_unsolved", tmp_path)
+    assert result.reason == "captcha_required"
+    names = client.names()
+    i = names.index("screenshot")
+    assert client.calls[i - 1][:2] == ("evaluate_value", "mask")
+    assert result.counters["screenshot_at"] > 0
+
+
+@pytest.mark.parametrize("name", ["captcha_before_form", "form_then_captcha"])
+def test_without_key_s21_scenarios_still_end_captcha_required_with_a_disabled_captcha(name, tmp_path):
+    from app.captcha_solver import solve_captcha
+
+    result, client, report = run_captcha(name, tmp_path, env=dict(ENV), solver=solve_captcha)
+    assert (result.status, result.reason) == ("ok", "captcha_required")
+    assert [c["outcome"] for c in report.captchas] == ["disabled"]
+    assert report.captchas[0]["attempts"] == []
+    assert "mouse_available" not in client.names()
+    assert result.counters["captchas"] == 1 and result.counters["captcha_tries"] == 0
+
+
+def test_with_a_key_but_no_plugin_the_captcha_is_unavailable(tmp_path):
+    from app.captcha_solver import solve_captcha
+
+    result, client, report = run_captcha("form_then_captcha", tmp_path, solver=solve_captcha)
+    assert result.reason == "captcha_required"
+    assert [c["outcome"] for c in report.captchas] == ["unavailable"]
+    assert "mouse_available" in client.names()
+
+
+def test_default_login_without_report_still_works(tmp_path):
+    # s21 callers (no report given): the login keeps its outcome.
+    result, _, _, _ = run("form_then_captcha", tmp_path)
+    assert result.reason == "captcha_required"
+    assert result.counters["captchas"] == 1
+
+
+def test_solver_time_is_outside_the_deadline(tmp_path):
+    result, _, _ = run_captcha("form_then_captcha_solved", tmp_path, seconds=200)
+    assert result.exit_code == 0
+    assert result.reason == "connected"
+
+
+def test_solver_budget_is_shared_by_the_run(tmp_path):
+    calls = []
+    run_captcha("captcha_four_times", tmp_path, seconds=50, calls=calls)
+    budgets = [c["deadline"] - c["now"] for c in calls]
+    assert budgets == [240.0, 190.0, 140.0]
+
+
+def test_solver_during_the_code_wait_does_not_double_pause(tmp_path):
+    calls = []
+    result, _, _ = run_captcha("code_then_captcha_solved", tmp_path, seconds=100, calls=calls)
+    assert result.reason == "connected"
+    assert result.exit_code == 0
+
+
+def test_two_hundred_seconds_outside_the_solver_still_exit_14(tmp_path):
+    clock_holder = {}
+
+    def slow(detail):
+        clock_holder["client"].clock.t += 200
+        return None
+
+    fixture = load("captcha_before_form_solved")
+    clock = Clock()
+    client = FakeClient(fixture, clock, raise_on={"type_text": slow})
+    clock_holder["client"] = client
+    report = CaptchaReport()
+    result = login(client, dict(ENV, SADCAPTCHA_API_KEY=KEY), clock=clock, sleep=make_sleep(clock),
+                   runs_dir=str(tmp_path), screenshots_dir=str(tmp_path / "s"), run_id=None, check_only=False,
+                   captcha_report=report, solver=fake_solver(["solved"]))
+    assert result.exit_code == 14
+    assert len(report.captchas) == 1
+
+
+def _run_main_captcha(monkeypatch, tmp_path, name, *, solver_outcomes=None, environ=None, **client_kwargs):
+    fixture = load(name)
+    client = FakeClient(fixture, Clock(), **client_kwargs)
+    monkeypatch.setattr(tiktok_login, "solve_captcha", fake_solver(
+        fixture.get("solver_outcomes", []) if solver_outcomes is None else solver_outcomes))
+    return run_main(monkeypatch, tmp_path, client,
+                    environ=dict(ENV, SADCAPTCHA_API_KEY=KEY) if environ is None else environ)
+
+
+def _last_payload(text):
+    lines = text.strip().splitlines()
+    match = CONSOLE_RE.match(lines[-1])
+    assert match, lines[-1]
+    return lines, json.loads(match.group(1))
+
+
+def test_main_ok_with_captchas_adds_the_report(monkeypatch, tmp_path):
+    code, text = _run_main_captcha(monkeypatch, tmp_path, "form_then_captcha_solved")
+    assert code == 0
+    lines, payload = _last_payload(text)
+    assert len(lines) == 2
+    assert lines[0].startswith("tiktok-login: result=connected")
+    assert payload["status"] == "ok" and payload["reason"] == "connected"
+    assert payload["captchas"] == [{"seq": 1, "outcome": "solved", "at": payload["captchas"][0]["at"],
+                                    "attempts": _ATTEMPTS["solved"]}]
+    assert payload["counters"]["captchas"] == 1 and payload["counters"]["captchas_solved"] == 1
+    assert all(isinstance(v, int) and not isinstance(v, bool) for v in payload["counters"].values())
+
+
+def test_main_without_captcha_has_no_captchas_key(monkeypatch, tmp_path):
+    code, text = _run_main_captcha(monkeypatch, tmp_path, "form_then_connected")
+    assert code == 0
+    _, payload = _last_payload(text)
+    assert "captchas" not in payload
+
+
+def test_main_exit_14_after_a_captcha_ends_with_the_report(monkeypatch, tmp_path):
+    clock = Clock()
+
+    def slow(detail):
+        clock.t += 200
+        return None
+
+    fixture = load("captcha_before_form_solved")
+    client = FakeClient(fixture, clock, raise_on={"type_text": slow})
+    monkeypatch.setattr(tiktok_login, "solve_captcha", fake_solver(["solved"]))
+    code, text = run_main(monkeypatch, tmp_path, client, environ=dict(ENV, SADCAPTCHA_API_KEY=KEY))
+    assert code == 14
+    lines, payload = _last_payload(text)
+    assert lines[0] == "tiktok-login: error=unexpected_response"
+    assert payload["status"] == "ok" and payload["reason"] == "unexpected_response"
+    assert [c["outcome"] for c in payload["captchas"]] == ["solved"]
+    assert payload["counters"]["captchas"] == 1
+
+
+def test_main_exit_16_after_a_captcha_ends_with_the_report(monkeypatch, tmp_path):
+    code, text = _run_main_captcha(monkeypatch, tmp_path, "captcha_before_form_solved",
+                                   raise_on={"type_text": RuntimeError("SECRETPASSWORD")})
+    assert code == 16
+    lines, payload = _last_payload(text)
+    assert lines[0] == "tiktok-login: error=internal class=RuntimeError"
+    assert payload["reason"] == "internal"
+    assert [c["outcome"] for c in payload["captchas"]] == ["solved"]
+    assert payload["counters"] == {"captchas": 1, "captchas_solved": 1, "captcha_tries": 1}
+    assert "SECRETPASSWORD" not in text
+
+
+def test_main_exit_15_without_captcha_is_unchanged(monkeypatch, tmp_path):
+    code, text = _run_main_captcha(monkeypatch, tmp_path, "form_then_connected",
+                                   tabs=[{"tabId": str(i), "url": ""} for i in range(9)])
+    assert code == 15 and text.strip() == "tiktok-login: error=tabs_full"
+
+
+@pytest.mark.parametrize(
+    "fixture, kwargs, expected_code",
+    [
+        ("form_then_captcha_solved", {}, 0),
+        ("form_then_captcha_unsolved", {}, 0),
+        ("already_connected", {}, 0),
+        ("captcha_before_form_solved", {"raise_on": {"list_tabs": CamofoxHTTPError(500)}}, 14),
+        ("form_then_connected", {"tabs": [{"tabId": str(i), "url": ""} for i in range(9)]}, 15),
+        ("captcha_before_form_solved", {"raise_on": {"type_text": RuntimeError(KEY)}}, 16),
+    ],
+)
+def test_sadcaptcha_key_never_printed(monkeypatch, tmp_path, capsys, fixture, kwargs, expected_code):
+    data = load(fixture)
+    client = FakeClient(data, Clock(), **kwargs)
+    monkeypatch.setattr(tiktok_login, "_build_client", lambda environ: client)
+    monkeypatch.setattr(tiktok_login, "_clock", client.clock)
+    monkeypatch.setattr(tiktok_login, "_sleep", make_sleep(client.clock))
+    monkeypatch.setattr(tiktok_login, "SCREENSHOTS_DIR", str(tmp_path / "shots"))
+    monkeypatch.setattr(tiktok_login, "RUNS_DIR", str(tmp_path))
+    monkeypatch.setattr(tiktok_login, "solve_captcha", fake_solver(data.get("solver_outcomes", [])))
+    code = main([], dict(ENV, SADCAPTCHA_API_KEY=KEY, CONSOLE_RUN_ID="5"), sys.stdout)
+    captured = capsys.readouterr()
+    assert code == expected_code
+    for secret in (KEY, "SECRETPASSWORD", "secretuser"):
+        assert secret not in captured.out + captured.err
+
+
+def test_sadcaptcha_key_never_printed_with_the_real_solver(monkeypatch, tmp_path, capsys):
+    client = FakeClient(load("form_then_captcha"), Clock())
+    code, text = run_main(monkeypatch, tmp_path, client, environ=dict(ENV, SADCAPTCHA_API_KEY=KEY))
+    captured = capsys.readouterr()
+    assert code == 0
+    _, payload = _last_payload(text)
+    assert [c["outcome"] for c in payload["captchas"]] == ["unavailable"]
+    assert KEY not in text + captured.out + captured.err
+
+
+def test_docstring_names_the_new_output_contract():
+    assert "CONSOLE_RESULT only if captchas were met" in tiktok_login.__doc__

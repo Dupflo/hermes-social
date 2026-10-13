@@ -1,0 +1,15 @@
+{
+  "description": "two identifiers at once: the upstream order picks the puzzle first",
+  "facts": {
+    "present": true,
+    "puzzle_v1": false,
+    "puzzle_v2": true,
+    "rotate_v1": false,
+    "rotate_v2": true,
+    "submit_v1": false,
+    "submit_v2": true,
+    "img_src_kind": "icon",
+    "challenge": ""
+  },
+  "expected": "puzzle_v2"
+}

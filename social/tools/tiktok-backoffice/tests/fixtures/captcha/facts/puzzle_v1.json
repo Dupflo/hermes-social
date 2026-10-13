@@ -1,0 +1,15 @@
+{
+  "description": "v1 wrapper with the sliding piece image",
+  "facts": {
+    "present": true,
+    "puzzle_v1": true,
+    "puzzle_v2": false,
+    "rotate_v1": false,
+    "rotate_v2": false,
+    "submit_v1": false,
+    "submit_v2": false,
+    "img_src_kind": "other",
+    "challenge": ""
+  },
+  "expected": "puzzle_v1"
+}
