@@ -1,5 +1,7 @@
 import json
 import logging
+import time
+from contextlib import asynccontextmanager
 from dataclasses import replace
 
 import httpx
@@ -20,9 +22,12 @@ from app.comment_review_store import CommentReviewStore
 from app.webhook_manual_review import reconcile_manual_review_replies
 from app.webhook_parser import parse_comment_events, parse_private_message_events
 from app.webhook_review_enqueue import enqueue_interesting_webhook_comments, enqueue_private_message_events
+from app.webhook_delivery_store import DeliverySummary, WebhookDeliveryStore, summarize_payload, summarize_raw
 
 
 logger = logging.getLogger(__name__)
+
+_NOT_READ = object()
 
 
 PRIVACY_POLICY_HTML = """<!doctype html>
@@ -130,8 +135,35 @@ META_AUTH_CALLBACK_HTML = """<!doctype html>
 """
 
 
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
+
+
+def _record_delivery(settings, summary: DeliverySummary, result: str, status_code: int, started: float) -> None:
+    """Record one webhook delivery (s08). Never raises, never logs the body or the exception message."""
+    latency_ms = round((time.perf_counter() - started) * 1000)
+    try:
+        WebhookDeliveryStore(settings.processed_comments_database).record(
+            summary, result, status_code, latency_ms, _now_ms()
+        )
+    except Exception as exc:
+        logger.warning("webhook_delivery_record_failed %s", type(exc).__name__)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # s08: create webhook_deliveries (and purge it) at startup, not at import time:
+    # `app = create_app()` runs on import, including during pytest collection.
+    try:
+        settings = get_settings()
+        WebhookDeliveryStore(settings.processed_comments_database).maybe_purge(_now_ms())
+    except Exception as exc:
+        logger.warning("webhook_delivery_startup_failed %s", type(exc).__name__)
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Meta Comment DM Automation")
+    app = FastAPI(title="Meta Comment DM Automation", lifespan=_lifespan)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -170,6 +202,7 @@ def create_app() -> FastAPI:
 
     @app.post("/webhook/meta")
     async def receive_webhook(request: Request) -> dict[str, int | str | list[dict[str, str]]]:
+        started = time.perf_counter()
         settings = get_settings()
         raw_body = await request.body()
         signatures = [
@@ -193,101 +226,112 @@ def create_app() -> FastAPI:
                 len(secrets),
                 bool(settings.instagram_app_secret),
             )
+            _record_delivery(settings, summarize_raw(raw_body), "signature_rejected", 403, started)
             raise HTTPException(status_code=403, detail="Invalid Meta signature")
 
-        payload = await request.json()
-        events = parse_comment_events(payload)
-        private_message_events = parse_private_message_events(payload)
-        owner_ids, owner_usernames = owner_identity_sets(settings)
-        review_store = CommentReviewStore(settings.processed_comments_database)
-        rule_store = CampaignRuleStore(settings.processed_comments_database)
-        processed_store = ProcessedCommentStore(settings.processed_comments_database)
-        outbound_store = OutboundMessageStore(settings.processed_comments_database)
-        follow_gate_store = FollowGateStore(settings.processed_comments_database)
+        payload = _NOT_READ
+        try:
+            payload = await request.json()
+            events = parse_comment_events(payload)
+            private_message_events = parse_private_message_events(payload)
+            owner_ids, owner_usernames = owner_identity_sets(settings)
+            review_store = CommentReviewStore(settings.processed_comments_database)
+            rule_store = CampaignRuleStore(settings.processed_comments_database)
+            processed_store = ProcessedCommentStore(settings.processed_comments_database)
+            outbound_store = OutboundMessageStore(settings.processed_comments_database)
+            follow_gate_store = FollowGateStore(settings.processed_comments_database)
 
-        async with httpx.AsyncClient(timeout=20) as http_client:
-            graph_client = GraphClient(
-                access_token=settings.meta_page_access_token,
-                http_client=http_client,
-                api_version=settings.graph_api_version,
-            )
-            events = await _hydrate_missing_instagram_media(events, graph_client)
+            async with httpx.AsyncClient(timeout=20) as http_client:
+                graph_client = GraphClient(
+                    access_token=settings.meta_page_access_token,
+                    http_client=http_client,
+                    api_version=settings.graph_api_version,
+                )
+                events = await _hydrate_missing_instagram_media(events, graph_client)
 
-            manual_replies = reconcile_manual_review_replies(
-                events=events,
-                review_store=review_store,
-                owner_ids=owner_ids,
-                owner_usernames=owner_usernames,
-            )
-            manual_queue_summary = enqueue_interesting_webhook_comments(
-                events=events,
-                review_store=review_store,
-                rule_store=rule_store,
-                processed_store=processed_store,
-                owner_ids=owner_ids,
-                owner_usernames=owner_usernames,
-                interest_only_keywords=_csv_set(settings.interest_only_keywords),
-            )
-            private_message_processor = PrivateMessageProcessor(
-                graph_client=graph_client,
-                follow_gate_store=follow_gate_store,
-                processed_store=processed_store,
-                outbound_store=outbound_store,
-                page_id=settings.meta_page_id,
-            )
-            private_message_results = await private_message_processor.process_events(private_message_events)
-            handled_private_message_ids = {
-                result.message_id for result in private_message_results if result.status == "follow_gate_unlocked"
-            }
-            private_messages_enqueued = enqueue_private_message_events(
-                events=[event for event in private_message_events if event.message_id not in handled_private_message_ids],
-                review_store=review_store,
-                owner_ids=owner_ids,
-            )
+                manual_replies = reconcile_manual_review_replies(
+                    events=events,
+                    review_store=review_store,
+                    owner_ids=owner_ids,
+                    owner_usernames=owner_usernames,
+                )
+                manual_queue_summary = enqueue_interesting_webhook_comments(
+                    events=events,
+                    review_store=review_store,
+                    rule_store=rule_store,
+                    processed_store=processed_store,
+                    owner_ids=owner_ids,
+                    owner_usernames=owner_usernames,
+                    interest_only_keywords=_csv_set(settings.interest_only_keywords),
+                )
+                private_message_processor = PrivateMessageProcessor(
+                    graph_client=graph_client,
+                    follow_gate_store=follow_gate_store,
+                    processed_store=processed_store,
+                    outbound_store=outbound_store,
+                    page_id=settings.meta_page_id,
+                )
+                private_message_results = await private_message_processor.process_events(private_message_events)
+                handled_private_message_ids = {
+                    result.message_id for result in private_message_results if result.status == "follow_gate_unlocked"
+                }
+                private_messages_enqueued = enqueue_private_message_events(
+                    events=[event for event in private_message_events if event.message_id not in handled_private_message_ids],
+                    review_store=review_store,
+                    owner_ids=owner_ids,
+                )
+                logger.info(
+                    "received Meta webhook object=%s entries=%s fields=%s parsed_events=%s private_messages=%s manual_review_replies=%s manual_review_enqueued=%s private_messages_enqueued=%s",
+                    payload.get("object"),
+                    len(payload.get("entry", [])),
+                    _webhook_fields(payload),
+                    len(events),
+                    len(private_message_events),
+                    manual_replies,
+                    manual_queue_summary.inserted_pending,
+                    private_messages_enqueued,
+                )
+
+                processor = CommentProcessor(
+                    graph_client=graph_client,
+                    store=processed_store,
+                    outbound_store=outbound_store,
+                    rule_store=rule_store,
+                    follow_gate_store=follow_gate_store,
+                    page_id=settings.meta_page_id,
+                    keyword=settings.resource_keyword,
+                    resource_url=settings.resource_url,
+                    public_reply_text=settings.public_reply_text,
+                    owner_ids=owner_ids,
+                    owner_usernames=owner_usernames,
+                    instagram_messaging_enabled=bool(settings.instagram_app_secret),
+                )
+                results = await processor.process_events(events)
+
             logger.info(
-                "received Meta webhook object=%s entries=%s fields=%s parsed_events=%s private_messages=%s manual_review_replies=%s manual_review_enqueued=%s private_messages_enqueued=%s",
-                payload.get("object"),
-                len(payload.get("entry", [])),
-                _webhook_fields(payload),
+                "processed Meta webhook parsed_events=%s result_statuses=%s",
                 len(events),
-                len(private_message_events),
-                manual_replies,
-                manual_queue_summary.inserted_pending,
-                private_messages_enqueued,
+                [result.status for result in results],
             )
 
-            processor = CommentProcessor(
-                graph_client=graph_client,
-                store=processed_store,
-                outbound_store=outbound_store,
-                rule_store=rule_store,
-                follow_gate_store=follow_gate_store,
-                page_id=settings.meta_page_id,
-                keyword=settings.resource_keyword,
-                resource_url=settings.resource_url,
-                public_reply_text=settings.public_reply_text,
-                owner_ids=owner_ids,
-                owner_usernames=owner_usernames,
-                instagram_messaging_enabled=bool(settings.instagram_app_secret),
-            )
-            results = await processor.process_events(events)
+            processed = sum(1 for result in results if result.status == "processed")
+            response = {
+                "status": "ok",
+                "processed": processed,
+                "manual_review_replies": manual_replies,
+                "manual_review_enqueued": manual_queue_summary.inserted_pending + private_messages_enqueued,
+                "private_messages_enqueued": private_messages_enqueued,
+                "results": [result.__dict__ for result in results],
+                "private_message_results": [result.__dict__ for result in private_message_results],
+            }
+        except Exception as exc:
+            status_code = exc.status_code if isinstance(exc, HTTPException) else 500
+            summary = summarize_raw(raw_body) if payload is _NOT_READ else summarize_payload(payload)
+            _record_delivery(settings, summary, "error", status_code, started)
+            raise
 
-        logger.info(
-            "processed Meta webhook parsed_events=%s result_statuses=%s",
-            len(events),
-            [result.status for result in results],
-        )
-
-        processed = sum(1 for result in results if result.status == "processed")
-        return {
-            "status": "ok",
-            "processed": processed,
-            "manual_review_replies": manual_replies,
-            "manual_review_enqueued": manual_queue_summary.inserted_pending + private_messages_enqueued,
-            "private_messages_enqueued": private_messages_enqueued,
-            "results": [result.__dict__ for result in results],
-            "private_message_results": [result.__dict__ for result in private_message_results],
-        }
+        _record_delivery(settings, summarize_payload(payload), "accepted", 200, started)
+        return response
 
     return app
 
