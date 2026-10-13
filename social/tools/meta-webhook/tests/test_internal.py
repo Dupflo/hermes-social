@@ -179,6 +179,8 @@ ROUTES = [
     # s16 (console ADR 044): conversation read routes, same auth and same absence from the public app.
     ("POST", "/internal/conversations", {"limit": 25}),
     ("POST", "/internal/conversations/messages", {"platform": "messenger", "ref": "dF8x", "cursor": None}),
+    # s17 (console ADR 045): DM reply route, same auth and same absence from the public app.
+    ("POST", "/internal/conversations/reply", {"platform": "messenger", "ref": "dF8x", "text": "x", "key": "k" * 16}),
 ]
 
 
@@ -1594,3 +1596,572 @@ def test_serve_keeps_httpx_quiet():
     """httpx logs the Graph URL (page token included) at INFO: serve.py must stay at WARNING."""
     serve = (Path(__file__).resolve().parents[1] / "app" / "serve.py").read_text(encoding="utf-8")
     assert "logging.basicConfig(level=logging.WARNING" in serve
+
+
+# --- s17 DM reply (console ADR 045) -----------------------------------------------------
+
+from app.dm_reply_store import DirectReplyStore  # noqa: E402
+from app.outbound_message_store import OutboundMessageStore  # noqa: E402
+
+DM_REPLY_TEXT = "secret-reply-text"
+DM_KEY = "s17KeyAbcdefghij0123"
+REPLY_NOW = datetime(2026, 10, 13, 9, 6, 0, tzinfo=timezone.utc)
+LEAD = "lead-psid"
+
+
+def reply_date(delta: timedelta) -> str:
+    return (REPLY_NOW - delta).strftime("%Y-%m-%dT%H:%M:%S+0000")
+
+
+def reply_participants(peer_id=LEAD):
+    return {"id": "t_1", "participants": {"data": [{"id": "999", "name": "Page"},
+                                                    {"id": peer_id, "name": PEER_NAME, "username": PEER_USERNAME}]}}
+
+
+def reply_messages(*entries):
+    """`entries` = (from_me, age) pairs, most recent first as Graph returns them."""
+    return {
+        "data": [
+            {"id": f"m_{index}", "message": f"{DM_TEXT} {index}", "from": {"id": "999" if from_me else LEAD},
+             "created_time": reply_date(age)}
+            for index, (from_me, age) in enumerate(entries)
+        ]
+    }
+
+
+class ReplyGraph(InboxGraph):
+    """InboxGraph + `send_page_message`. `send` = a result dict, an exception, or an Event to wait on first."""
+
+    def __init__(self, *, participants=None, messages=None, send=None):
+        super().__init__(
+            participants=participants if participants is not None else reply_participants(),
+            messages=messages if messages is not None else reply_messages((False, timedelta(hours=1))),
+        )
+        self.send = send
+        self.gate = None
+
+    def sends(self):
+        return [call for call in self.calls if call[0] == "send_page_message"]
+
+    async def send_page_message(self, page_id, recipient_id, text):
+        self.calls.append(("send_page_message", page_id, recipient_id, text))
+        if self.gate is not None:
+            await self.gate.wait()
+        if isinstance(self.send, BaseException):
+            raise self.send
+        return self.send if self.send is not None else {"recipient_id": recipient_id, "message_id": "m_sent_1"}
+
+
+@pytest.fixture
+def dm(env, monkeypatch):
+    graph = ReplyGraph()
+    use_graph(monkeypatch, graph)
+    monkeypatch.setattr(internal, "_now", lambda: REPLY_NOW)
+    return graph
+
+
+def reply_body(**overrides):
+    body = {"platform": "messenger", "ref": encode_ref("t_1"), "text": DM_REPLY_TEXT, "key": DM_KEY}
+    body.update(overrides)
+    return body
+
+
+def send_reply(client, body=None, headers=AUTH):
+    return client.post("/internal/conversations/reply", headers=headers, json=body if body is not None else reply_body())
+
+
+def dm_rows(env):
+    with sqlite3.connect(env["database"]) as connection:
+        connection.row_factory = sqlite3.Row
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'console_dm_replies'"
+        ).fetchone()
+        if not exists:
+            return []
+        return [dict(found) for found in connection.execute("SELECT * FROM console_dm_replies")]
+
+
+def outbound_rows(env):
+    with sqlite3.connect(env["database"]) as connection:
+        connection.row_factory = sqlite3.Row
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'outbound_messages'"
+        ).fetchone()
+        if not exists:
+            return []
+        return [dict(found) for found in connection.execute("SELECT * FROM outbound_messages ORDER BY id")]
+
+
+def assert_no_reply_leak(response):
+    for forbidden in ("access_token", "graph.facebook.com", "page-token", TOKEN, DM_REPLY_TEXT, PEER_NAME, LEAD):
+        assert forbidden not in response.text
+
+
+# nominal (AC 1, AC 3)
+
+
+def test_messenger_reply_is_sent_once_to_the_conversation_peer_and_logged(env, client, dm):
+    response = send_reply(client, reply_body(text=f"  {DM_REPLY_TEXT}\n"))
+
+    assert response.status_code == 200
+    assert response.json() == {"result": "sent", "message_id": "m_sent_1", "logged": True}
+    assert dm.sends() == [("send_page_message", "999", LEAD, DM_REPLY_TEXT)]
+    assert ("list_conversation_messages", "t_1", 20, None) in dm.calls
+    [sent] = outbound_rows(env)
+    assert {key: sent[key] for key in ("platform", "source_type", "source_id", "recipient_id", "message_type",
+                                       "message_text", "meta_response_id", "status")} == {
+        "platform": "facebook",
+        "source_type": "console",
+        "source_id": DM_KEY,
+        "recipient_id": LEAD,
+        "message_type": "dm_reply",
+        "message_text": DM_REPLY_TEXT,
+        "meta_response_id": "m_sent_1",
+        "status": "sent",
+    }
+    [key_row] = dm_rows(env)
+    assert key_row["idempotency_key"] == DM_KEY
+    assert key_row["platform"] == "messenger"
+    assert key_row["status"] == "sent"
+    assert key_row["meta_response_id"] == "m_sent_1"
+    assert set(key_row) == {"idempotency_key", "platform", "status", "result", "meta_response_id", "created_at",
+                            "updated_at"}
+    assert_no_reply_leak(response)
+
+
+def test_instagram_reply_is_logged_on_the_instagram_platform(env, client, dm):
+    response = send_reply(client, reply_body(platform="instagram", ref=encode_ref("ig_1")))
+    assert response.json()["result"] == "sent"
+    assert outbound_rows(env)[0]["platform"] == "instagram"
+    assert dm_rows(env)[0]["platform"] == "instagram"
+
+
+def test_reply_never_reads_an_older_page_of_the_thread(env, client, dm):
+    send_reply(client)
+    assert [call for call in dm.calls if call[0] == "list_conversation_messages"] == [
+        ("list_conversation_messages", "t_1", 20, None)
+    ]
+
+
+def test_recipient_is_the_non_page_participant_even_after_a_page_message(env, client, dm):
+    dm.messages = reply_messages((True, timedelta(minutes=5)), (False, timedelta(hours=2)))
+    assert send_reply(client).json()["result"] == "sent"
+    assert dm.sends()[0][2] == LEAD
+
+
+def test_sent_without_message_id_answers_null(env, client, dm):
+    dm.send = {"recipient_id": LEAD}
+    assert send_reply(client).json() == {"result": "sent", "message_id": None, "logged": True}
+
+
+# AC 5: no recipient, sender or tag from the console
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"recipient": {"id": "someone"}},
+        {"recipient_id": "someone"},
+        {"sender": "999"},
+        {"from": "999"},
+        {"page_id": "999"},
+        {"tag": "HUMAN_AGENT"},
+        {"messaging_type": "MESSAGE_TAG"},
+    ],
+)
+def test_a_body_naming_a_recipient_or_sender_is_422_without_graph_or_claim(env, client, dm, extra):
+    response = send_reply(client, reply_body(**extra))
+    assert response.status_code == 422
+    assert response.json() == {"error": "invalid_request"}
+    assert dm.calls == []
+    assert dm_rows(env) == []
+
+
+def test_no_recipient_in_the_conversation_sends_nothing(env, client, dm):
+    dm.participants = {"participants": {"data": [{"id": "999", "name": "Page"}]}}
+    response = send_reply(client)
+    assert response.json() == {"result": "no_recipient"}
+    assert dm.sends() == []
+    assert dm_rows(env)[0]["status"] == "failed"
+
+
+# 24-hour window (AC 2), applied by Python just before the POST
+
+
+def test_window_closed_at_exactly_twenty_four_hours(env, client, dm):
+    dm.messages = reply_messages((False, timedelta(hours=24)))
+    response = send_reply(client)
+    assert response.json() == {"result": "window_closed", "closes_at": "2026-10-13T09:06:00.000Z"}
+    assert dm.sends() == []
+    assert dm_rows(env)[0]["status"] == "failed"
+    assert outbound_rows(env) == []
+
+
+def test_window_open_one_second_before_twenty_four_hours(env, client, dm):
+    dm.messages = reply_messages((False, timedelta(hours=23, minutes=59, seconds=59)))
+    assert send_reply(client).json()["result"] == "sent"
+    assert len(dm.sends()) == 1
+
+
+def test_only_page_messages_is_an_unknown_window_treated_as_closed(env, client, dm):
+    dm.messages = reply_messages((True, timedelta(minutes=1)), (True, timedelta(hours=1)))
+    assert send_reply(client).json() == {"result": "window_closed", "closes_at": None}
+    assert dm.sends() == []
+
+
+def test_empty_thread_is_an_unknown_window(env, client, dm):
+    dm.messages = {"data": []}
+    assert send_reply(client).json() == {"result": "window_closed", "closes_at": None}
+    assert dm.sends() == []
+
+
+# idempotency (ADR 045 §2)
+
+
+def test_the_same_key_after_a_success_is_a_duplicate_without_graph(env, client, dm):
+    assert send_reply(client).json()["result"] == "sent"
+    calls = len(dm.calls)
+    response = send_reply(client)
+    assert response.json() == {"result": "duplicate", "status": "sent"}
+    assert len(dm.calls) == calls
+    assert len(dm.sends()) == 1
+    assert len(outbound_rows(env)) == 1
+
+
+def test_two_concurrent_replies_with_the_same_key_post_exactly_once(env, dm):
+    dm.gate = asyncio.Event()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=internal.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://internal") as http:
+            url = "/internal/conversations/reply"
+            first = asyncio.create_task(http.post(url, headers=AUTH, json=reply_body()))
+            for _ in range(500):
+                if dm.sends():
+                    break
+                await asyncio.sleep(0.01)
+            assert dm.sends(), "the first request never reached Graph"
+            second = await asyncio.wait_for(http.post(url, headers=AUTH, json=reply_body()), 5)
+            dm.gate.set()
+            return await asyncio.wait_for(first, 5), second
+
+    first, second = asyncio.run(scenario())
+
+    assert first.json()["result"] == "sent"
+    assert second.json() == {"result": "duplicate", "status": "sending"}
+    assert len(dm.sends()) == 1
+    assert len(outbound_rows(env)) == 1
+
+
+@pytest.mark.parametrize(
+    ("send", "first_result", "status"),
+    [
+        (GraphAPIError("x", code=10, subcode=2018278, meta_message="(#10) x", http_status=400), "graph_error", "failed"),
+        (httpx.ConnectError("boom"), "uncertain", "uncertain"),
+    ],
+)
+def test_a_replayed_finished_key_is_a_duplicate_with_its_status(env, client, dm, send, first_result, status):
+    dm.send = send
+    assert send_reply(client).json()["result"] == first_result
+    calls = len(dm.calls)
+    assert send_reply(client).json() == {"result": "duplicate", "status": status}
+    assert len(dm.calls) == calls
+
+
+def test_a_replayed_window_closed_key_is_a_failed_duplicate(env, client, dm):
+    dm.messages = reply_messages((False, timedelta(days=2)))
+    send_reply(client)
+    assert send_reply(client).json() == {"result": "duplicate", "status": "failed"}
+    assert dm.sends() == []
+
+
+def test_a_failed_status_reread_answers_a_conservative_sending(env, client, dm, monkeypatch):
+    send_reply(client)
+
+    def boom(self, key):
+        raise sqlite3.OperationalError("locked")
+
+    monkeypatch.setattr(DirectReplyStore, "status_of", boom)
+    assert send_reply(client).json() == {"result": "duplicate", "status": "sending"}
+
+
+# everything before the POST: nothing left, never a 500 (R6)
+
+
+def test_an_exception_while_reading_the_thread_is_graph_unreachable_and_failed(env, client, dm, monkeypatch, caplog):
+    async def boom(*args, **kwargs):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(internal, "read_thread", boom)
+    with caplog.at_level(logging.WARNING):
+        response = send_reply(client)
+    assert response.status_code == 200
+    assert response.json() == {"result": "graph_unreachable"}
+    assert dm.sends() == []
+    assert dm_rows(env)[0]["status"] == "failed"
+    assert "dm_reply_pre_send_failed RuntimeError" in caplog.text
+
+
+def test_a_failing_finish_after_a_successful_send_still_answers_sent(env, client, dm, monkeypatch):
+    real_finish = DirectReplyStore.finish
+
+    def finish(self, key, status, result, meta_response_id=None):
+        if status == "sent":
+            raise sqlite3.OperationalError("locked")
+        return real_finish(self, key, status, result, meta_response_id)
+
+    monkeypatch.setattr(DirectReplyStore, "finish", finish)
+    response = send_reply(client)
+    assert response.json() == {"result": "sent", "message_id": "m_sent_1", "logged": True}
+    assert dm_rows(env)[0]["status"] == "sending"
+    assert send_reply(client).json() == {"result": "duplicate", "status": "sending"}
+    assert len(dm.sends()) == 1
+
+
+def test_a_failing_record_after_success_is_sent_but_unlogged(env, client, dm, monkeypatch, caplog):
+    def boom(self, **kwargs):
+        raise sqlite3.OperationalError("disk full")
+
+    monkeypatch.setattr(OutboundMessageStore, "record_sent", boom)
+    with caplog.at_level(logging.WARNING):
+        response = send_reply(client)
+    assert response.json() == {"result": "sent", "message_id": "m_sent_1", "logged": False}
+    assert dm_rows(env)[0]["status"] == "sent"
+    assert "dm_reply_unlogged OperationalError" in caplog.text
+
+
+def test_a_failing_finish_after_a_refusal_still_answers(env, client, dm, monkeypatch):
+    dm.send = GraphAPIError("x", code=551, meta_message="(#551) x", http_status=400)
+
+    def boom(self, *args, **kwargs):
+        raise sqlite3.OperationalError("locked")
+
+    monkeypatch.setattr(DirectReplyStore, "finish", boom)
+    response = send_reply(client)
+    assert response.status_code == 200
+    assert response.json()["result"] == "graph_error"
+
+
+def test_store_unavailable_before_the_claim_is_503_without_graph(env, dm, monkeypatch):
+    def boom(self):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(DirectReplyStore, "_ensure_schema", boom)
+    response = TestClient(internal.app, raise_server_exceptions=False).post(
+        "/internal/conversations/reply", headers=AUTH, json=reply_body()
+    )
+    assert response.status_code == 503
+    assert response.json() == {"error": "internal_error"}
+    assert dm.calls == []
+
+
+# Meta errors with the real GraphClient on a MockTransport (AC 4)
+
+
+def reply_transport(monkeypatch, post, *, messages=None, get_error=None):
+    posts = []
+
+    def handler(request):
+        if request.method == "POST":
+            posts.append(request)
+            if isinstance(post, BaseException):
+                raise post
+            return post
+        if get_error is not None:
+            if isinstance(get_error, BaseException):
+                raise get_error
+            return get_error
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(200, json=messages or reply_messages((False, timedelta(hours=1))))
+        return httpx.Response(200, json=reply_participants())
+
+    use_transport(monkeypatch, handler)
+    monkeypatch.setattr(internal, "_now", lambda: REPLY_NOW)
+    return posts
+
+
+def meta_error(status, code, subcode=None, message="(#x) meta says no", error_type="OAuthException"):
+    error = {"message": message, "type": error_type, "code": code}
+    if subcode is not None:
+        error["error_subcode"] = subcode
+    return httpx.Response(status, json={"error": error})
+
+
+def test_real_client_posts_the_exact_send_api_request(env, client, monkeypatch):
+    posts = reply_transport(monkeypatch, httpx.Response(200, json={"recipient_id": LEAD, "message_id": "m_9"}))
+    assert send_reply(client).json() == {"result": "sent", "message_id": "m_9", "logged": True}
+    [post] = posts
+    assert post.url.path == "/v21.0/999/messages"
+    assert json.loads(post.content) == {"recipient": {"id": LEAD}, "messaging_type": "RESPONSE",
+                                        "message": {"text": DM_REPLY_TEXT}}
+
+
+@pytest.mark.parametrize(
+    ("response", "code", "subcode"),
+    [(meta_error(400, 10, 2018278), 10, 2018278), (meta_error(400, 551), 551, None), (meta_error(400, 10), 10, None)],
+)
+def test_certain_meta_refusals_are_graph_errors_and_failed(env, client, monkeypatch, response, code, subcode):
+    reply_transport(monkeypatch, response)
+    body = send_reply(client).json()
+    assert body == {"result": "graph_error", "code": code, "subcode": subcode, "type": "OAuthException",
+                    "message": "(#x) meta says no"}
+    assert dm_rows(env)[0]["status"] == "failed"
+    assert outbound_rows(env) == []
+
+
+@pytest.mark.parametrize(
+    "post",
+    [
+        meta_error(500, 2),
+        meta_error(400, 2),
+        meta_error(400, 1),
+        httpx.Response(502, text="<html>bad gateway</html>"),
+        httpx.ConnectError("boom"),
+        httpx.ReadTimeout("slow"),
+    ],
+)
+def test_ambiguous_send_outcomes_are_uncertain(env, client, monkeypatch, post):
+    posts = reply_transport(monkeypatch, post)
+    assert send_reply(client).json() == {"result": "uncertain"}
+    assert len(posts) == 1
+    assert dm_rows(env)[0]["status"] == "uncertain"
+    assert outbound_rows(env) == []
+
+
+def test_a_meta_code_on_a_5xx_is_uncertain(env, client, monkeypatch):
+    reply_transport(monkeypatch, meta_error(500, 10, 2018278))
+    assert send_reply(client).json() == {"result": "uncertain"}
+
+
+def test_a_timeout_while_reading_the_thread_sends_nothing(env, client, monkeypatch):
+    posts = reply_transport(monkeypatch, httpx.Response(200, json={}), get_error=httpx.ReadTimeout("slow"))
+    assert send_reply(client).json() == {"result": "graph_unreachable"}
+    assert posts == []
+    assert dm_rows(env)[0]["status"] == "failed"
+
+
+def test_an_unknown_conversation_is_a_graph_error_100_without_post(env, client, monkeypatch):
+    posts = reply_transport(monkeypatch, httpx.Response(200, json={}), get_error=meta_error(400, 100))
+    body = send_reply(client).json()
+    assert body["result"] == "graph_error"
+    assert body["code"] == 100
+    assert posts == []
+    assert dm_rows(env)[0]["status"] == "failed"
+
+
+def test_a_meta_message_never_carries_the_page_token(env, client, monkeypatch):
+    reply_transport(monkeypatch, meta_error(400, 190, message="bad page-token here"))
+    response = send_reply(client)
+    assert response.json()["message"] == "bad [redacted] here"
+    assert "page-token" not in response.text
+
+
+# invalid bodies (422) and configuration (503): no store, no Graph
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"text": ""},
+        {"text": "   \n "},
+        {"text": "a" * 2001},
+        {"platform": "instagram", "ref": encode_ref("ig_1"), "text": "é" * 500 + "a"},
+        {"key": "k" * 15},
+        {"key": "k" * 15 + "/"},
+        {"key": "k" * 65},
+        {"platform": "facebook"},
+        {"ref": "!!"},
+        {"text": 12},
+    ],
+)
+def test_invalid_reply_bodies_are_422_without_store_or_graph(env, client, dm, overrides):
+    response = send_reply(client, reply_body(**overrides))
+    assert response.status_code == 422
+    assert response.json() == {"error": "invalid_request"}
+    assert dm.calls == []
+    assert dm_rows(env) == []
+
+
+def test_missing_fields_are_422(env, client, dm):
+    for field in ("platform", "ref", "text", "key"):
+        body = reply_body()
+        del body[field]
+        assert send_reply(client, body).status_code == 422
+    assert dm.calls == []
+
+
+def test_two_thousand_emojis_are_accepted_on_messenger(env, client, dm):
+    assert send_reply(client, reply_body(text="😀" * 2000)).json()["result"] == "sent"
+
+
+def test_a_thousand_bytes_are_accepted_on_instagram(env, client, dm):
+    body = reply_body(platform="instagram", ref=encode_ref("ig_1"), text="é" * 500)
+    assert send_reply(client, body).json()["result"] == "sent"
+
+
+@pytest.mark.parametrize("forged", ["me/accounts", "x?y", "../x"])
+def test_forged_reply_refs_never_reach_a_store_or_graph(env, client, dm, forged):
+    response = send_reply(client, reply_body(ref=encode_ref(forged)))
+    assert response.status_code == 422
+    assert response.json() == {"error": "invalid_cursor"}
+    assert dm.calls == []
+    assert dm_rows(env) == []
+
+
+@pytest.mark.parametrize("variable", ["META_PAGE_ACCESS_TOKEN", "META_PAGE_ID"])
+def test_unconfigured_page_is_503_without_claim(env, client, dm, monkeypatch, variable):
+    monkeypatch.setenv(variable, "")
+    response = send_reply(client)
+    assert response.status_code == 503
+    assert response.json() == {"error": "meta_unconfigured"}
+    assert dm.calls == []
+    assert dm_rows(env) == []
+
+
+# s16 cuts (BLOCKERS s16): never more than the zod bounds of the console
+
+
+def test_conversations_are_cut_to_the_limit(env, client, inbox):
+    inbox.lists = {"messenger": {"data": [graph_conversation(f"t_{index}") for index in range(30)]}}
+    body = list_conversations(client).json()
+    assert len(body["messenger"]["conversations"]) == 25
+
+
+def test_thread_messages_are_cut_to_twenty(env, client, inbox):
+    inbox.messages = {"data": graph_messages(25)}
+    body = read_thread(client, encode_ref("t_1")).json()
+    assert [message["id"] for message in body["messages"]] == [f"m_{index}" for index in range(20)]
+
+
+def test_instagram_cap_is_still_computed_on_the_raw_length(env, client, inbox):
+    inbox.messages = {"data": graph_messages(25)}
+    body = read_thread(client, encode_ref("ig_1"), platform="instagram").json()
+    assert len(body["messages"]) == 20
+    assert body["capped"] is True
+
+
+# leaks
+
+
+def test_reply_route_logs_neither_text_name_ref_key_nor_token(env, client, dm, monkeypatch, caplog):
+    ref = encode_ref("t_1")
+    with caplog.at_level(logging.DEBUG):
+        responses = [send_reply(client)]
+        dm.send = httpx.ConnectError("boom")
+        responses.append(send_reply(client, reply_body(key="another-key-0123456789")))
+        dm.messages = httpx.ConnectError("boom")
+        responses.append(send_reply(client, reply_body(key="third-key-0123456789ab")))
+
+        def boom(self, **kwargs):
+            raise sqlite3.OperationalError("disk full")
+
+        monkeypatch.setattr(OutboundMessageStore, "record_sent", boom)
+        dm.send = None
+        dm.messages = reply_messages((False, timedelta(hours=1)))
+        responses.append(send_reply(client, reply_body(key="fourth-key-0123456789")))
+    for response in responses:
+        assert_no_reply_leak(response)
+    logs = "\n".join(record.getMessage() for record in caplog.records)
+    for forbidden in (DM_REPLY_TEXT, PEER_NAME, PEER_USERNAME, LEAD, ref, "t_1", DM_KEY, "another-key", TOKEN,
+                      "page-token"):
+        assert forbidden not in logs

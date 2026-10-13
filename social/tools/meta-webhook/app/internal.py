@@ -22,6 +22,15 @@ which never leaves Python. Second bounded exception to "codes only", limited to 
 routes: they return conversation data (names, texts) normalised by `app.inbox_read`, and a
 per-platform `graph_error` with Meta's redacted message. Graph only: no database is opened. Ids
 and cursors leave as opaque refs; names, texts and refs are never logged (exception type only).
+
+s17 (console ADR 045): `POST /internal/conversations/reply` sends a text reply as the page in a
+conversation addressed by its `ref`. The body carries no recipient, sender, page or tag: Python
+resolves the recipient from the conversation's participants. The idempotency key is claimed in
+`console_dm_replies` (`app.dm_reply_store`) before any Graph call, the 24-hour window is checked
+again on the most recent page of the thread just before the POST, and `outbound_messages` gets a
+row only after Meta's confirmation. Bounded exception to "codes only", limited to the
+`graph_error` result of this route (Meta's redacted message, as ADR 042 §4). The text, the
+recipient, the ref and the key are never logged (exception type only).
 """
 
 import asyncio
@@ -31,6 +40,7 @@ import hmac
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 import httpx
@@ -42,9 +52,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app import replay
 from app.comment_review_store import CommentReviewStore
 from app.config import Settings, get_settings
+from app.dm_reply import KEY_PATTERN, format_utc_ms, reply_window, text_too_long
+from app.dm_reply_store import DirectReplyStore
 from app.graph_client import GraphAPIError, GraphClient
 from app.inbox_read import (
     REF_PATTERN,
+    ID_MAX,
     as_int,
     bounded_str,
     decode_conversation_ref,
@@ -113,6 +126,11 @@ def _monotonic() -> float:
     return time.monotonic()
 
 
+def _now() -> datetime:
+    """Clock of the 24-hour window guard (s17), replaceable in tests."""
+    return datetime.now(timezone.utc)
+
+
 class _Unauthorized(Exception):
     pass
 
@@ -166,6 +184,23 @@ class ConversationMessagesBody(BaseModel):
         # Instagram only exposes the 20 most recent messages of a conversation: never page past them.
         if self.platform == "instagram" and self.cursor is not None:
             raise ValueError("instagram cursor")
+        return self
+
+
+class ConversationReplyBody(BaseModel):
+    """s17 (ADR 045 §1): no recipient, sender, page, tag or messaging_type field can exist (extra=forbid)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    platform: Literal["instagram", "messenger"]
+    ref: Annotated[str, Field(pattern=REF_PATTERN)]
+    text: Annotated[str, Field(max_length=8000)]
+    key: Annotated[str, Field(pattern=KEY_PATTERN)]
+
+    @model_validator(mode="after")
+    def _text_within_the_platform_bound(self) -> "ConversationReplyBody":
+        if not self.text.strip() or text_too_long(self.platform, self.text):
+            raise ValueError("text length")
         return self
 
 
@@ -249,7 +284,7 @@ async def read_platform_conversations(graph_client, settings: Settings, platform
     conversations = [
         conversation
         for conversation in (
-            normalize_conversation(raw, owner_ids, owner_usernames) for raw in _graph_entries(data)
+            normalize_conversation(raw, owner_ids, owner_usernames) for raw in _graph_entries(data)[:limit]
         )
         if conversation is not None
     ]
@@ -283,7 +318,7 @@ async def read_thread(graph_client, settings: Settings, platform: str, conversat
     entries = _graph_entries(data)
     messages = [
         message
-        for message in (normalize_message(raw, owner_ids, owner_usernames) for raw in entries)
+        for message in (normalize_message(raw, owner_ids, owner_usernames) for raw in entries[:THREAD_LIMIT])
         if message is not None
     ]
     older_cursor = None
@@ -376,6 +411,89 @@ async def review_reply(platform: str, comment_id: str, text: str, settings: Sett
     return JSONResponse(
         status_code=200, content={"result": "replied", "status": status, "posted_reply_id": posted_reply_id}
     )
+
+
+def _finish_quietly(store: DirectReplyStore, key: str, status: str, result: str, meta_response_id=None) -> None:
+    """A failed status update never changes the answer: the key row stays, the lock holds."""
+    try:
+        store.finish(key, status, result, meta_response_id)
+    except Exception as error:  # noqa: BLE001
+        logger.warning("dm_reply_finish_failed %s", type(error).__name__)
+
+
+def _key_status(store: DirectReplyStore, key: str) -> str:
+    try:
+        return store.status_of(key) or "sending"
+    except Exception:  # noqa: BLE001 - conservative: an unknown status is "maybe in flight"
+        return "sending"
+
+
+async def _pre_send(graph_client, settings: Settings, platform: str, conversation_id: str):
+    """Most recent page of the thread, recipient and window. (refusal payload, None) or (None, peer id)."""
+    thread = await read_thread(graph_client, settings, platform, conversation_id, None)
+    if thread.get("result") != "ok":
+        return thread, None
+    peer_id = (thread.get("peer") or {}).get("id")
+    if not peer_id:
+        return {"result": "no_recipient"}, None
+    state, closes_at = reply_window(thread.get("messages") or [], _now())
+    if state != "open":
+        return {"result": "window_closed", "closes_at": format_utc_ms(closes_at) if closes_at else None}, None
+    return None, peer_id
+
+
+async def conversation_reply(body: ConversationReplyBody, conversation_id: str, settings: Settings) -> JSONResponse:
+    """ADR 045 §3 order: stores, claim, re-read + recipient + window, POST, outbound_messages, answer."""
+    try:
+        keys = DirectReplyStore(settings.processed_comments_database)
+        outbound = OutboundMessageStore(settings.processed_comments_database)
+    except Exception as error:  # noqa: BLE001 - nothing claimed yet: a plain retryable error
+        logger.warning("dm_reply_store_unavailable %s", type(error).__name__)
+        return JSONResponse(status_code=503, content={"error": "internal_error"})
+    if not keys.claim(body.key, body.platform):
+        return JSONResponse(status_code=200, content={"result": "duplicate", "status": _key_status(keys, body.key)})
+
+    text = body.text.strip()
+    posted = False
+    try:
+        async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT_S) as http_client:
+            graph_client = _graph_client_factory(settings, http_client)
+            refusal, peer_id = await _pre_send(graph_client, settings, body.platform, conversation_id)
+            if refusal is not None:
+                _finish_quietly(keys, body.key, "failed", str(refusal["result"]))
+                return JSONResponse(status_code=200, content=refusal)
+            posted = True
+            result = await graph_client.send_page_message(settings.meta_page_id, peer_id, text)
+    except Exception as error:  # noqa: BLE001 - every outcome after the claim is answered, never a 500
+        if not posted:
+            logger.warning("dm_reply_pre_send_failed %s", type(error).__name__)
+            _finish_quietly(keys, body.key, "failed", "graph_unreachable")
+            return JSONResponse(status_code=200, content={"result": "graph_unreachable"})
+        if is_certain_refusal(error):
+            _finish_quietly(keys, body.key, "failed", "graph_error")
+            return JSONResponse(status_code=200, content=graph_error_payload(error, settings.meta_page_access_token))
+        logger.warning("dm_reply_uncertain %s", type(error).__name__)
+        _finish_quietly(keys, body.key, "uncertain", "uncertain")
+        return JSONResponse(status_code=200, content={"result": "uncertain"})
+
+    result = result if isinstance(result, dict) else {}
+    message_id = bounded_str(result.get("message_id"), ID_MAX)
+    logged = True
+    try:
+        outbound.record_sent(
+            platform="facebook" if body.platform == "messenger" else "instagram",
+            source_type="console",
+            source_id=body.key,
+            recipient_id=peer_id,
+            message_type="dm_reply",
+            message_text=text,
+            meta_response_id=message_id,
+        )
+    except Exception as error:  # noqa: BLE001 - sent but not logged: the screen says so
+        logger.warning("dm_reply_unlogged %s", type(error).__name__)
+        logged = False
+    _finish_quietly(keys, body.key, "sent", "sent", message_id)
+    return JSONResponse(status_code=200, content={"result": "sent", "message_id": message_id, "logged": logged})
 
 
 def encode_cursor(sweep_started: str, after: tuple[str, str, str] | None) -> str:
@@ -616,6 +734,18 @@ def create_internal_app() -> FastAPI:
                 after if body.platform == "messenger" else None,
             )
         return JSONResponse(status_code=200, content=result)
+
+    @app.post("/internal/conversations/reply")
+    async def conversation_reply_route(body: ConversationReplyBody) -> JSONResponse:
+        # Decoded and validated before any store or Graph client exists (ADR 045 §1).
+        try:
+            conversation_id = decode_conversation_ref(body.ref)
+        except ValueError:
+            raise _BadCursor() from None
+        settings = get_settings()
+        if _inbox_unconfigured(settings):
+            return JSONResponse(status_code=503, content={"error": "meta_unconfigured"})
+        return await conversation_reply(body, conversation_id, settings)
 
     return app
 

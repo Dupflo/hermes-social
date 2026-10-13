@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "open_one_ms_before_24h",
+      "now": "2026-10-13T09:05:59.999Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-12T09:06:00+0000" }
+      ],
+      "expected": { "state": "open", "boundary": "2026-10-13T09:06:00.000Z" }
+    },
+    {
+      "name": "closed_at_exactly_24h",
+      "now": "2026-10-13T09:06:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-12T09:06:00+0000" }
+      ],
+      "expected": { "state": "closed", "boundary": "2026-10-13T09:06:00.000Z" }
+    },
+    {
+      "name": "closed_one_ms_after_24h",
+      "now": "2026-10-13T09:06:00.001Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-12T09:06:00+0000" }
+      ],
+      "expected": { "state": "closed", "boundary": "2026-10-13T09:06:00.000Z" }
+    },
+    {
+      "name": "unknown_when_only_page_messages",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": true, "created_time": "2026-10-13T08:00:00+0000" },
+        { "from_me": true, "created_time": "2026-10-12T08:00:00+0000" }
+      ],
+      "expected": { "state": "unknown", "boundary": null }
+    },
+    {
+      "name": "unknown_when_empty",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [],
+      "expected": { "state": "unknown", "boundary": null }
+    },
+    {
+      "name": "incoming_without_text_opens",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-13T08:00:00+0000" }
+      ],
+      "expected": { "state": "open", "boundary": "2026-10-14T08:00:00.000Z" }
+    },
+    {
+      "name": "unreadable_incoming_is_ignored",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "not-a-date" },
+        { "from_me": false, "created_time": "2026-13-01T00:00:00+0000" },
+        { "from_me": true, "created_time": "2026-10-13T08:00:00+0000" }
+      ],
+      "expected": { "state": "unknown", "boundary": null }
+    },
+    {
+      "name": "unreadable_incoming_ignored_readable_older_decides",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "13/10/2026 08:59" },
+        { "from_me": false, "created_time": "2026-10-12T07:00:00+0000" }
+      ],
+      "expected": { "state": "closed", "boundary": "2026-10-13T07:00:00.000Z" }
+    },
+    {
+      "name": "most_recent_incoming_wins",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-12T03:00:00+0000" },
+        { "from_me": false, "created_time": "2026-10-13T07:00:00+0000" },
+        { "from_me": false, "created_time": "2026-10-11T09:00:00+0000" }
+      ],
+      "expected": { "state": "open", "boundary": "2026-10-14T07:00:00.000Z" }
+    },
+    {
+      "name": "page_more_recent_than_incoming_is_decided_by_incoming",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": true, "created_time": "2026-10-13T08:59:00+0000" },
+        { "from_me": false, "created_time": "2026-10-12T08:00:00+0000" }
+      ],
+      "expected": { "state": "closed", "boundary": "2026-10-13T08:00:00.000Z" }
+    },
+    {
+      "name": "grammar_offset_with_colon",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-13T08:00:00+00:00" }
+      ],
+      "expected": { "state": "open", "boundary": "2026-10-14T08:00:00.000Z" }
+    },
+    {
+      "name": "grammar_zulu",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-13T08:00:00Z" }
+      ],
+      "expected": { "state": "open", "boundary": "2026-10-14T08:00:00.000Z" }
+    },
+    {
+      "name": "grammar_non_utc_offset",
+      "now": "2026-10-13T09:00:00.000Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-13T10:00:00+0200" }
+      ],
+      "expected": { "state": "open", "boundary": "2026-10-14T08:00:00.000Z" }
+    },
+    {
+      "name": "grammar_fraction_of_second",
+      "now": "2026-10-14T08:00:00.122Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-13T08:00:00.123+0000" }
+      ],
+      "expected": { "state": "open", "boundary": "2026-10-14T08:00:00.123Z" }
+    },
+    {
+      "name": "grammar_fraction_of_second_boundary",
+      "now": "2026-10-14T08:00:00.123Z",
+      "messages": [
+        { "from_me": false, "created_time": "2026-10-13T08:00:00.123+0000" }
+      ],
+      "expected": { "state": "closed", "boundary": "2026-10-14T08:00:00.123Z" }
+    }
+  ]
+}

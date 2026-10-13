@@ -93,6 +93,17 @@ class GraphClient:
             },
         )
 
+    async def send_page_message(self, page_id: str, recipient_id: str, text: str) -> dict[str, Any]:
+        """s17 (console ADR 045 §3): a text reply sent by the page inside the 24-hour window, never tagged."""
+        return await self._post(
+            f"/{page_id}/messages",
+            json={
+                "recipient": {"id": recipient_id},
+                "messaging_type": "RESPONSE",
+                "message": {"text": text},
+            },
+        )
+
     async def get_instagram_comment_media(self, comment_id: str) -> dict[str, Any]:
         return await self._get(f"/{comment_id}", params={"fields": "media{id,permalink,caption}"})
 
