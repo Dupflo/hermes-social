@@ -57,8 +57,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     fetch_camofox = sub.add_parser("fetch-comments-camofox")
     fetch_camofox.add_argument("--video-url", required=True)
-    fetch_camofox.add_argument("--base-url", default="http://camofox:9377")
-    fetch_camofox.add_argument("--user-id", default="hermes_80317d7dba")
+    # s20: defaults read from CAMOFOX_URL / CAMOFOX_USER_ID (CamofoxClient.from_env) when omitted.
+    fetch_camofox.add_argument("--base-url", default=None)
+    fetch_camofox.add_argument("--user-id", default=None)
     fetch_camofox.add_argument("--session-key", default="tiktok-comments-fetch")
     fetch_camofox.add_argument("--wait-seconds", type=float, default=8.0)
     fetch_camofox.add_argument("--ingest", action="store_true")

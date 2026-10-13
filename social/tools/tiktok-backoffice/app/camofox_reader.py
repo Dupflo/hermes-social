@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import Any, Mapping
 
 
 DEFAULT_CAMOFOX_BASE_URL = "http://camofox:9377"
@@ -194,18 +197,104 @@ def extract_comments_from_dom_result(dom_result: dict[str, Any]) -> list[dict[st
     return comments
 
 
+class CamofoxError(RuntimeError):
+    """Base of the typed Camofox errors (s20). Messages never carry a body, an URL or the key."""
+
+
+class CamofoxHTTPError(CamofoxError):
+    def __init__(self, status: int) -> None:
+        super().__init__(f"camofox http status {int(status)}")
+        self.status = int(status)
+
+
+class CamofoxUnreachable(CamofoxError):
+    def __init__(self) -> None:
+        super().__init__("camofox unreachable")
+
+
 @dataclass(frozen=True)
 class CamofoxClient:
     base_url: str = DEFAULT_CAMOFOX_BASE_URL
     user_id: str = DEFAULT_CAMOFOX_USER_ID
     timeout: int = 30
+    # s20 (console ADR 049): Bearer for the requireAuth routes (storage_state). Never printed.
+    api_key: str = field(default="", repr=False)
 
-    def _request_json(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> "CamofoxClient":
+        env = os.environ if environ is None else environ
+        return cls(
+            base_url=(env.get("CAMOFOX_URL") or "").strip() or DEFAULT_CAMOFOX_BASE_URL,
+            user_id=(env.get("CAMOFOX_USER_ID") or "").strip() or DEFAULT_CAMOFOX_USER_ID,
+            api_key=(env.get("CAMOFOX_API_KEY") or "").strip(),
+        )
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        query: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
         url = self.base_url.rstrip("/") + path
+        if query:
+            url += "?" + urllib.parse.urlencode(query)
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method=method)
-        with urllib.request.urlopen(req, timeout=self.timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout if timeout is None else timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            exc.close()
+            raise CamofoxHTTPError(status) from None
+        except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError):
+            raise CamofoxUnreachable() from None
+
+    def health(self, *, timeout: float | None = None) -> dict[str, Any]:
+        response = self._request_json("GET", "/health", timeout=timeout)
+        return response if isinstance(response, dict) else {}
+
+    def list_tabs(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
+        response = self._request_json("GET", "/tabs", query={"userId": self.user_id}, timeout=timeout)
+        tabs = response.get("tabs") if isinstance(response, dict) else None
+        if not isinstance(tabs, list):
+            raise ValueError("unexpected tabs payload")
+        return [
+            {"tabId": str(tab.get("tabId")), "url": str(tab.get("url") or "")}
+            for tab in tabs
+            if isinstance(tab, dict) and tab.get("tabId")
+        ]
+
+    def create_blank_tab(self, session_key: str, *, timeout: float | None = None) -> str:
+        # No url: Camofox opens about:blank and restores the persisted profile, without navigating.
+        response = self._request_json(
+            "POST", "/tabs", {"userId": self.user_id, "sessionKey": session_key}, timeout=timeout
+        )
+        tab_id = response.get("tabId") if isinstance(response, dict) else None
+        if not tab_id:
+            raise ValueError("camofox did not return tabId")
+        return str(tab_id)
+
+    def delete_tab(self, tab_id: str, *, timeout: float | None = None) -> None:
+        self._request_json(
+            "DELETE",
+            f"/tabs/{urllib.parse.quote(str(tab_id), safe='')}",
+            query={"userId": self.user_id},
+            timeout=timeout,
+        )
+
+    def storage_state(self, timeout: float = 60) -> dict[str, Any]:
+        path = f"/sessions/{urllib.parse.quote(self.user_id, safe='')}/storage_state"
+        response = self._request_json("GET", path, timeout=timeout)
+        if not isinstance(response, dict):
+            raise ValueError("unexpected storage_state payload")
+        return response
 
     def create_tab(self, *, session_key: str, url: str) -> str:
         response = self._request_json("POST", "/tabs", {"userId": self.user_id, "sessionKey": session_key, "url": url})
@@ -214,8 +303,10 @@ class CamofoxClient:
             raise RuntimeError(f"Camofox did not return tabId: {response!r}")
         return str(tab_id)
 
-    def evaluate(self, *, tab_id: str, expression: str) -> Any:
-        response = self._request_json("POST", f"/tabs/{tab_id}/evaluate", {"userId": self.user_id, "expression": expression})
+    def evaluate(self, *, tab_id: str, expression: str, timeout: float | None = None) -> Any:
+        response = self._request_json(
+            "POST", f"/tabs/{tab_id}/evaluate", {"userId": self.user_id, "expression": expression}, timeout=timeout
+        )
         if not response.get("ok"):
             raise RuntimeError(f"Camofox evaluate failed: {response!r}")
         return response.get("result")
@@ -503,12 +594,18 @@ def _reload_target_video_expression(video_url: str, attempt: int) -> str:
 def fetch_comments_from_camofox(
     *,
     video_url: str,
-    base_url: str = DEFAULT_CAMOFOX_BASE_URL,
-    user_id: str = DEFAULT_CAMOFOX_USER_ID,
+    base_url: str | None = None,
+    user_id: str | None = None,
     session_key: str = "tiktok-comments-fetch",
     wait_seconds: float = 8.0,
 ) -> dict[str, Any]:
-    client = CamofoxClient(base_url=base_url, user_id=user_id)
+    # s20: defaults come from the environment (CAMOFOX_URL, CAMOFOX_USER_ID, CAMOFOX_API_KEY);
+    # explicit values keep priority.
+    client = CamofoxClient.from_env()
+    if base_url:
+        client = replace(client, base_url=base_url)
+    if user_id:
+        client = replace(client, user_id=user_id)
     activation_result: Any = None
     activation_errors: list[str] = []
     dom_result: dict[str, Any] | None = None
@@ -540,7 +637,7 @@ def fetch_comments_from_camofox(
             if attempt < 2:
                 client.evaluate(tab_id=tab_id, expression=_reload_target_video_expression(video_url, attempt + 1))
                 time.sleep(max(wait_seconds, 6.0))
-    except urllib.error.URLError as exc:
+    except (urllib.error.URLError, CamofoxUnreachable, CamofoxHTTPError) as exc:
         return {"ok": False, "error": "camofox_unreachable", "detail": str(exc), "comments": []}
     except Exception as exc:
         return {"ok": False, "error": "camofox_fetch_failed", "detail": str(exc), "comments": []}

@@ -76,6 +76,10 @@ services:
       - "127.0.0.1:5901:5900"        # raw VNC — local only
     environment:
       CAMOFOX_PORT: "9377"
+      # s20 (hermes-console ADR 049): protects storage_state (read by the console session check).
+      # Same key as the hermes service, which gets it from deploy/.env through env_file. A restart does
+      # not re-read the environment: recreate both with `docker compose up -d camofox hermes`.
+      CAMOFOX_API_KEY: ${CAMOFOX_API_KEY:-}
       ENABLE_VNC: "1"
       VNC_BIND: 0.0.0.0
       VNC_RESOLUTION: 1920x1080
