@@ -1,0 +1,23 @@
+{
+  "description": "Login page without the expected form: login_unknown, counted as an attempt.",
+  "storage_states": [
+    []
+  ],
+  "probes": [
+    {
+      "form": false,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    }
+  ],
+  "mask_count": 0,
+  "screenshot_b64": "iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "expected": {
+    "status": "ok",
+    "reason": "login_unknown",
+    "attempted": 1,
+    "code_rounds": 0
+  }
+}

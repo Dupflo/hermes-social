@@ -14,6 +14,8 @@ from typing import Any, Mapping
 
 DEFAULT_CAMOFOX_BASE_URL = "http://camofox:9377"
 DEFAULT_CAMOFOX_USER_ID = "hermes_80317d7dba"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024
 
 _NAVIGATION_TEXT = {
     "tiktok", "search", "for you", "explore", "following", "friends", "live",
@@ -295,6 +297,94 @@ class CamofoxClient:
         if not isinstance(response, dict):
             raise ValueError("unexpected storage_state payload")
         return response
+
+    # --- s21 (console ADR 050): login methods. Typed errors only; a message never carries a body, an URL,
+    # the typed text or a response repr.
+
+    def _request_bytes(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        accept: str = "image/png",
+        max_bytes: int = SCREENSHOT_MAX_BYTES,
+    ) -> bytes:
+        url = self.base_url.rstrip("/") + path
+        if query:
+            url += "?" + urllib.parse.urlencode(query)
+        headers = {"Content-Type": "application/json", "Accept": accept}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urllib.request.Request(url, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout if timeout is None else timeout) as response:
+                data = response.read(max_bytes + 1)
+        except urllib.error.HTTPError as exc:
+            status = exc.code
+            exc.close()
+            raise CamofoxHTTPError(status) from None
+        except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError):
+            raise CamofoxUnreachable() from None
+        if len(data) > max_bytes:
+            raise ValueError("unexpected screenshot payload size")
+        return data
+
+    def _tab_path(self, tab_id: str, action: str) -> str:
+        return f"/tabs/{urllib.parse.quote(str(tab_id), safe='')}/{action}"
+
+    def navigate(self, tab_id: str, url: str, *, timeout: float = 35) -> None:
+        # Camofox waits page.goto(..., {timeout: 30000}) before answering: 35 s client side.
+        response = self._request_json(
+            "POST", self._tab_path(tab_id, "navigate"), {"userId": self.user_id, "url": url}, timeout=timeout
+        )
+        if not isinstance(response, dict):
+            raise ValueError("unexpected navigate payload")
+
+    def type_text(
+        self, tab_id: str, selector: str, text: str, *, delay_ms: int = 60, timeout: float | None = None
+    ) -> None:
+        # Always real keystrokes (mode keyboard), never submit/pressEnter. A 409 page_changed is CamofoxHTTPError(409).
+        response = self._request_json(
+            "POST",
+            self._tab_path(tab_id, "type"),
+            {"userId": self.user_id, "selector": selector, "text": text, "mode": "keyboard", "delay": int(delay_ms)},
+            timeout=timeout,
+        )
+        if not isinstance(response, dict):
+            raise ValueError("unexpected type payload")
+
+    def press(self, tab_id: str, key: str, *, timeout: float | None = None) -> None:
+        response = self._request_json(
+            "POST", self._tab_path(tab_id, "press"), {"userId": self.user_id, "key": key}, timeout=timeout
+        )
+        if not isinstance(response, dict):
+            raise ValueError("unexpected press payload")
+
+    def click_selector(self, tab_id: str, selector: str, *, timeout: float | None = None) -> None:
+        response = self._request_json(
+            "POST", self._tab_path(tab_id, "click"), {"userId": self.user_id, "selector": selector}, timeout=timeout
+        )
+        if not isinstance(response, dict) or not response.get("ok"):
+            raise ValueError("unexpected click payload")
+
+    def evaluate_value(self, tab_id: str, expression: str, *, timeout: float | None = None) -> Any:
+        response = self._request_json(
+            "POST", self._tab_path(tab_id, "evaluate"), {"userId": self.user_id, "expression": expression},
+            timeout=timeout,
+        )
+        if not isinstance(response, dict) or not response.get("ok"):
+            raise ValueError("unexpected evaluate payload")
+        return response.get("result")
+
+    def screenshot(self, tab_id: str, *, timeout: float | None = None) -> bytes:
+        data = self._request_bytes(
+            "GET", self._tab_path(tab_id, "screenshot"), query={"userId": self.user_id}, timeout=timeout
+        )
+        if data[:8] != PNG_SIGNATURE:
+            raise ValueError("unexpected screenshot payload")
+        return data
 
     def create_tab(self, *, session_key: str, url: str) -> str:
         response = self._request_json("POST", "/tabs", {"userId": self.user_id, "sessionKey": session_key, "url": url})

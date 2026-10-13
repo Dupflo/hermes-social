@@ -1,0 +1,23 @@
+{
+  "description": "Captcha before the form: captcha_required, counted as an attempt, never reloaded.",
+  "storage_states": [
+    []
+  ],
+  "probes": [
+    {
+      "form": false,
+      "captcha": true,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    }
+  ],
+  "mask_count": 0,
+  "screenshot_b64": "iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "expected": {
+    "status": "ok",
+    "reason": "captcha_required",
+    "attempted": 1,
+    "code_rounds": 0
+  }
+}

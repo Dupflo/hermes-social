@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -22,8 +24,10 @@ from app.camofox_reader import (
 class _Recorder:
     def __init__(self) -> None:
         self.requests: list[dict] = []
-        # path (without query) -> (status, body dict)
-        self.responses: dict[tuple[str, str], tuple[int, dict]] = {}
+        # path (without query) -> (status, body dict) or, s21, (status, raw bytes, content type)
+        self.responses: dict[tuple[str, str], tuple] = {}
+        # s21: path (without query) -> seconds to wait before answering
+        self.delays: dict[tuple[str, str], float] = {}
 
 
 def _make_handler(recorder: _Recorder):
@@ -42,10 +46,17 @@ def _make_handler(recorder: _Recorder):
                 "headers": {k.lower(): v for k, v in self.headers.items()},
                 "body": json.loads(raw) if raw else None,
             })
-            status, body = recorder.responses.get((method, parts.path), (200, {"ok": True}))
-            payload = json.dumps(body).encode("utf-8")
+            response = recorder.responses.get((method, parts.path), (200, {"ok": True}))
+            delay = recorder.delays.get((method, parts.path))
+            if delay:
+                time.sleep(delay)
+            if len(response) == 3:
+                status, payload, content_type = response
+            else:
+                status, body = response
+                payload, content_type = json.dumps(body).encode("utf-8"), "application/json"
             self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -204,3 +215,118 @@ def test_cli_fetch_defaults_come_from_env(monkeypatch, tmp_path):
     assert seen["base_url"] is None and seen["user_id"] is None
     cli.run(["--db", str(tmp_path / "t.sqlite3"), "fetch-comments-camofox", "--video-url", "https://www.tiktok.com/@a/video/1", "--base-url", "http://b:1", "--user-id", "hermes_b"])
     assert seen["base_url"] == "http://b:1" and seen["user_id"] == "hermes_b"
+
+
+# --- s21: login methods (navigate, keyboard typing, press, typed click/evaluate, binary screenshot) ---
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+def test_type_text_uses_keyboard_mode_and_delay(server):
+    recorder, base = server
+    CamofoxClient(base_url=base, user_id="hermes_u").type_text("tab-1", "input[name=username]", "hello", delay_ms=70)
+    req = recorder.requests[0]
+    assert req["method"] == "POST"
+    assert req["path"] == "/tabs/tab-1/type"
+    assert req["body"] == {
+        "userId": "hermes_u", "selector": "input[name=username]", "text": "hello", "mode": "keyboard", "delay": 70,
+    }
+    assert "submit" not in req["body"] and "pressEnter" not in req["body"]
+
+
+def test_type_text_default_delay_is_60(server):
+    recorder, base = server
+    CamofoxClient(base_url=base).type_text("t", "#x", "a")
+    assert recorder.requests[0]["body"]["delay"] == 60
+    assert recorder.requests[0]["body"]["mode"] == "keyboard"
+
+
+def test_type_text_409_is_typed_and_never_carries_the_text(server):
+    recorder, base = server
+    recorder.responses[("POST", "/tabs/t/type")] = (409, {"error": "page_changed BODYMARKER", "url": "https://x"})
+    with pytest.raises(CamofoxHTTPError) as info:
+        CamofoxClient(base_url=base).type_text("t", "input[type=password]", "SECRETPASSWORD")
+    assert info.value.status == 409
+    text = str(info.value) + repr(info.value)
+    for leaked in ("SECRETPASSWORD", "BODYMARKER", base, "password"):
+        assert leaked not in text
+
+
+def test_navigate_body_and_default_timeout(server):
+    recorder, base = server
+    CamofoxClient(base_url=base, user_id="hermes_u").navigate("t-2", "https://www.tiktok.com/login")
+    req = recorder.requests[0]
+    assert (req["method"], req["path"]) == ("POST", "/tabs/t-2/navigate")
+    assert req["body"] == {"userId": "hermes_u", "url": "https://www.tiktok.com/login"}
+    assert inspect.signature(CamofoxClient.navigate).parameters["timeout"].default == 35
+
+
+def test_navigate_slower_than_timeout_is_unreachable(server):
+    recorder, base = server
+    recorder.delays[("POST", "/tabs/t/navigate")] = 1.0
+    with pytest.raises(CamofoxUnreachable):
+        CamofoxClient(base_url=base).navigate("t", "https://www.tiktok.com/login", timeout=0.2)
+
+
+def test_press_body(server):
+    recorder, base = server
+    CamofoxClient(base_url=base, user_id="hermes_u").press("t", "Enter")
+    req = recorder.requests[0]
+    assert (req["method"], req["path"]) == ("POST", "/tabs/t/press")
+    assert req["body"] == {"userId": "hermes_u", "key": "Enter"}
+
+
+def test_click_selector_and_evaluate_value_are_typed(server):
+    recorder, base = server
+    recorder.responses[("POST", "/tabs/t/evaluate")] = (200, {"ok": True, "result": {"form": True}})
+    client = CamofoxClient(base_url=base, user_id="hermes_u")
+    assert client.evaluate_value("t", "1+1") == {"form": True}
+    client.click_selector("t", "button[type=submit]")
+    assert recorder.requests[1]["body"] == {"userId": "hermes_u", "selector": "button[type=submit]"}
+    recorder.responses[("POST", "/tabs/t/evaluate")] = (200, {"ok": False, "error": "BODYMARKER SECRETPASSWORD"})
+    recorder.responses[("POST", "/tabs/t/click")] = (200, {"ok": False, "error": "BODYMARKER"})
+    with pytest.raises(ValueError) as info:
+        client.evaluate_value("t", "SECRETPASSWORD")
+    assert "BODYMARKER" not in str(info.value) and "SECRETPASSWORD" not in str(info.value)
+    with pytest.raises(ValueError) as info:
+        client.click_selector("t", "#b")
+    assert "BODYMARKER" not in str(info.value)
+    recorder.responses[("POST", "/tabs/t/click")] = (422, {"error": "detached BODYMARKER"})
+    with pytest.raises(CamofoxHTTPError) as http:
+        client.click_selector("t", "#b")
+    assert http.value.status == 422 and "BODYMARKER" not in str(http.value)
+
+
+def test_screenshot_returns_png_bytes(server):
+    recorder, base = server
+    recorder.responses[("GET", "/tabs/t/screenshot")] = (200, PNG, "image/png")
+    data = CamofoxClient(base_url=base, user_id="hermes_u", api_key="k").screenshot("t")
+    assert data == PNG
+    req = recorder.requests[0]
+    assert req["method"] == "GET"
+    assert req["query"] == {"userId": ["hermes_u"]}
+    assert req["headers"]["accept"] == "image/png"
+    assert req["headers"]["authorization"] == "Bearer k"
+
+
+def test_screenshot_rejects_non_png(server):
+    recorder, base = server
+    recorder.responses[("GET", "/tabs/t/screenshot")] = (200, b"<html>BODYMARKER</html>", "text/html")
+    with pytest.raises(ValueError) as info:
+        CamofoxClient(base_url=base).screenshot("t")
+    assert "BODYMARKER" not in str(info.value)
+
+
+def test_screenshot_rejects_oversized_payload(server):
+    recorder, base = server
+    recorder.responses[("GET", "/tabs/t/screenshot")] = (200, PNG + b"\x00" * (8 * 1024 * 1024), "image/png")
+    with pytest.raises(ValueError):
+        CamofoxClient(base_url=base).screenshot("t")
+
+
+def test_screenshot_http_error_is_typed(server):
+    recorder, base = server
+    recorder.responses[("GET", "/tabs/t/screenshot")] = (404, {"error": "BODYMARKER"})
+    with pytest.raises(CamofoxHTTPError) as info:
+        CamofoxClient(base_url=base).screenshot("t")
+    assert info.value.status == 404 and "BODYMARKER" not in str(info.value)

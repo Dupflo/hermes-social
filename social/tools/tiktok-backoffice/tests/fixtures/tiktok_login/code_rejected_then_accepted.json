@@ -1,0 +1,62 @@
+{
+  "description": "First code refused by TikTok, second accepted in the same window.",
+  "storage_states": [
+    [],
+    [
+      {
+        "name": "sessionid",
+        "domain": ".tiktok.com",
+        "value": "fixture-session",
+        "expires": -1
+      },
+      {
+        "name": "sid_tt",
+        "domain": ".tiktok.com",
+        "value": "fixture-sid",
+        "expires": -1
+      }
+    ]
+  ],
+  "probes": [
+    {
+      "form": true,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    },
+    {
+      "form": false,
+      "captcha": false,
+      "code_screen": true,
+      "bad_credentials": false,
+      "code_error": false
+    },
+    {
+      "form": false,
+      "captcha": false,
+      "code_screen": true,
+      "bad_credentials": false,
+      "code_error": true
+    },
+    {
+      "form": false,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    }
+  ],
+  "mask_count": 1,
+  "screenshot_b64": "iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+  "codes": [
+    "111111",
+    "482917"
+  ],
+  "expected": {
+    "status": "ok",
+    "reason": "connected",
+    "attempted": 1,
+    "code_rounds": 2
+  }
+}

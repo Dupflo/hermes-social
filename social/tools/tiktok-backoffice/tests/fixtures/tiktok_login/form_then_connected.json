@@ -1,0 +1,43 @@
+{
+  "description": "Login form, credentials accepted without 2FA.",
+  "storage_states": [
+    [],
+    [
+      {
+        "name": "sessionid",
+        "domain": ".tiktok.com",
+        "value": "fixture-session",
+        "expires": -1
+      },
+      {
+        "name": "sid_tt",
+        "domain": ".tiktok.com",
+        "value": "fixture-sid",
+        "expires": -1
+      }
+    ]
+  ],
+  "probes": [
+    {
+      "form": true,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    },
+    {
+      "form": false,
+      "captcha": false,
+      "code_screen": false,
+      "bad_credentials": false,
+      "code_error": false
+    }
+  ],
+  "mask_count": 2,
+  "expected": {
+    "status": "ok",
+    "reason": "connected",
+    "attempted": 1,
+    "code_rounds": 0
+  }
+}

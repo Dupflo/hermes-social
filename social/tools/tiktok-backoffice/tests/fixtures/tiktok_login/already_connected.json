@@ -1,0 +1,26 @@
+{
+  "description": "Session cookies already present: nothing is typed.",
+  "storage_states": [
+    [
+      {
+        "name": "sessionid",
+        "domain": ".tiktok.com",
+        "value": "fixture-session",
+        "expires": -1
+      },
+      {
+        "name": "sid_tt",
+        "domain": ".tiktok.com",
+        "value": "fixture-sid",
+        "expires": -1
+      }
+    ]
+  ],
+  "probes": [],
+  "expected": {
+    "status": "skipped",
+    "reason": "already_connected",
+    "attempted": 0,
+    "code_rounds": 0
+  }
+}
