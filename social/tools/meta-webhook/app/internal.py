@@ -26,7 +26,9 @@ and cursors leave as opaque refs; names, texts and refs are never logged (except
 s17 (console ADR 045): `POST /internal/conversations/reply` sends a text reply as the page in a
 conversation addressed by its `ref`. The body carries no recipient, sender, page or tag: Python
 resolves the recipient from the conversation's participants. The idempotency key is claimed in
-`console_dm_replies` (`app.dm_reply_store`) before any Graph call, the 24-hour window is checked
+`console_dm_replies` (`app.dm_reply_store`) before any Graph call — a fresh key is refused
+(`conversation_held`, unclaimed, no Graph call) while another key of the same conversation is
+`sending`/`uncertain` and younger than 15 minutes (console review n°3) — the 24-hour window is checked
 again on the most recent page of the thread just before the POST, and `outbound_messages` gets a
 row only after Meta's confirmation. Bounded exception to "codes only", limited to the
 `graph_error` result of this route (Meta's redacted message, as ADR 042 §4). The text, the
@@ -448,12 +450,23 @@ async def conversation_reply(body: ConversationReplyBody, conversation_id: str, 
         keys = DirectReplyStore(settings.processed_comments_database)
         outbound = OutboundMessageStore(settings.processed_comments_database)
         # A claim that raises rolls back (DirectReplyStore.claim): nothing taken, nothing sent.
-        claimed = keys.claim(body.key, body.platform)
+        claim = keys.claim(body.key, body.platform, conversation_id, _now())
     except Exception as error:  # noqa: BLE001 - nothing claimed yet: a plain retryable error
         logger.warning("dm_reply_store_unavailable %s", type(error).__name__)
         return JSONResponse(status_code=503, content={"error": "internal_error"})
-    if not claimed:
+    if claim.kind == "duplicate":
         return JSONResponse(status_code=200, content={"result": "duplicate", "status": _key_status(keys, body.key)})
+    if claim.kind == "held":
+        # Review n°3: another key of this conversation is still sending/uncertain (< 15 min).
+        # Certain refusal: this key is not claimed and Graph is never called.
+        return JSONResponse(
+            status_code=200,
+            content={
+                "result": "conversation_held",
+                "status": claim.status,
+                "retry_after": format_utc_ms(claim.retry_after),
+            },
+        )
 
     text = body.text.strip()
     posted = False

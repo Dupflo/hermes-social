@@ -1724,8 +1724,12 @@ def test_messenger_reply_is_sent_once_to_the_conversation_peer_and_logged(env, c
     assert key_row["platform"] == "messenger"
     assert key_row["status"] == "sent"
     assert key_row["meta_response_id"] == "m_sent_1"
-    assert set(key_row) == {"idempotency_key", "platform", "status", "result", "meta_response_id", "created_at",
-                            "updated_at"}
+    # Review n°3: the decoded conversation id (never the ref) and the route's clock are recorded
+    # for the conversation hold; still no text nor recipient.
+    assert key_row["conversation_id"] == "t_1"
+    assert key_row["created_at"] == "2026-10-13 09:06:00"
+    assert set(key_row) == {"idempotency_key", "platform", "conversation_id", "status", "result",
+                            "meta_response_id", "created_at", "updated_at"}
     assert_no_reply_leak(response)
 
 
@@ -1885,6 +1889,89 @@ def test_a_failed_status_reread_answers_a_conservative_sending(env, client, dm, 
     assert send_reply(client).json() == {"result": "duplicate", "status": "sending"}
 
 
+# conversation hold (console review n°3, ADR 045 amendment): a fresh key is refused, unclaimed and
+# without any Graph call, while another key of the same conversation is sending/uncertain < 15 min.
+
+OTHER_KEY = "s17OtherKeyAbcdef0123"
+HELD_UNTIL = "2026-10-13T09:21:00.000Z"
+
+
+def test_a_fresh_key_after_an_uncertain_send_is_held_without_graph(env, client, dm):
+    dm.send = httpx.ConnectError("boom")
+    assert send_reply(client).json()["result"] == "uncertain"
+    calls = len(dm.calls)
+    dm.send = None
+    response = send_reply(client, reply_body(key=OTHER_KEY))
+    assert response.status_code == 200
+    assert response.json() == {"result": "conversation_held", "status": "uncertain", "retry_after": HELD_UNTIL}
+    assert len(dm.calls) == calls
+    assert len(dm.sends()) == 1
+    assert [row["idempotency_key"] for row in dm_rows(env)] == [DM_KEY]
+    assert outbound_rows(env) == []
+
+
+def test_two_concurrent_fresh_keys_of_one_conversation_post_exactly_once(env, dm):
+    dm.gate = asyncio.Event()
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=internal.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://internal") as http:
+            url = "/internal/conversations/reply"
+            first = asyncio.create_task(http.post(url, headers=AUTH, json=reply_body()))
+            for _ in range(500):
+                if dm.sends():
+                    break
+                await asyncio.sleep(0.01)
+            assert dm.sends(), "the first request never reached Graph"
+            calls = len(dm.calls)
+            second = await asyncio.wait_for(http.post(url, headers=AUTH, json=reply_body(key=OTHER_KEY)), 5)
+            assert len(dm.calls) == calls
+            dm.gate.set()
+            return await asyncio.wait_for(first, 5), second
+
+    first, second = asyncio.run(scenario())
+
+    assert first.json()["result"] == "sent"
+    assert second.json() == {"result": "conversation_held", "status": "sending", "retry_after": HELD_UNTIL}
+    assert len(dm.sends()) == 1
+    assert len(outbound_rows(env)) == 1
+
+
+def test_a_fresh_key_is_allowed_fifteen_minutes_after_an_uncertain_send(env, client, dm, monkeypatch):
+    dm.send = httpx.ConnectError("boom")
+    send_reply(client)
+    dm.send = None
+    monkeypatch.setattr(internal, "_now", lambda: REPLY_NOW + timedelta(minutes=14, seconds=59))
+    assert send_reply(client, reply_body(key=OTHER_KEY)).json()["result"] == "conversation_held"
+    monkeypatch.setattr(internal, "_now", lambda: REPLY_NOW + timedelta(minutes=15))
+    assert send_reply(client, reply_body(key=OTHER_KEY)).json()["result"] == "sent"
+    assert len(dm.sends()) == 2
+
+
+@pytest.mark.parametrize(
+    "send",
+    [None, GraphAPIError("x", code=10, subcode=2018278, meta_message="(#10) x", http_status=400)],
+)
+def test_a_certain_outcome_does_not_hold_the_conversation(env, client, dm, send):
+    dm.send = send
+    send_reply(client)
+    dm.send = None
+    assert send_reply(client, reply_body(key=OTHER_KEY)).json()["result"] == "sent"
+
+
+def test_another_conversation_is_not_held(env, client, dm):
+    dm.send = httpx.ConnectError("boom")
+    send_reply(client)
+    dm.send = None
+    assert send_reply(client, reply_body(key=OTHER_KEY, ref=encode_ref("t_2"))).json()["result"] == "sent"
+
+
+def test_the_held_key_replayed_by_itself_stays_a_duplicate(env, client, dm):
+    dm.send = httpx.ConnectError("boom")
+    send_reply(client)
+    assert send_reply(client).json() == {"result": "duplicate", "status": "uncertain"}
+
+
 # everything before the POST: nothing left, never a 500 (R6)
 
 
@@ -1958,7 +2045,7 @@ def test_store_unavailable_before_the_claim_is_503_without_graph(env, dm, monkey
 def test_a_claim_that_raises_is_a_certain_503_without_graph(env, dm, monkeypatch, caplog):
     # Console review n°1 (m1): the claim rolls back, nothing is taken nor sent: a certain
     # failure (console `dm_unavailable`, key kept), never a 500 read as uncertain.
-    def boom(self, key, platform):
+    def boom(self, *args):
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(DirectReplyStore, "claim", boom)
