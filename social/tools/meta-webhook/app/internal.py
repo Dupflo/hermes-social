@@ -8,6 +8,13 @@ the comment text, an error message, a username or a Graph URL.
 s13 (console ADR 038): `POST /internal/keywords/match` previews a campaign's keywords with
 `app.keyword.contains_keyword` (the very matcher of the webhook), so the console never
 reimplements the Meta logic. Pure function: no database, no Graph call, index only.
+
+s15 (console ADR 042): `POST /internal/review/{platform}/{comment_id}/reply|skip|release` treat
+the review queue. A reply goes to Graph only after the conditional claim `pending|in_review ->
+sending`; a certain Meta refusal puts the item back `pending`, anything ambiguous leaves it
+`sending` (`uncertain`), never a 500. Bounded exception to "codes only": the `graph_error` result of
+the `reply` route carries Meta's raw `error.message` (page token redacted, 300 characters max).
+No other text — comment, reply, username, Graph URL — ever appears in a response or a log.
 """
 
 import base64
@@ -22,12 +29,15 @@ import httpx
 from fastapi import Depends, FastAPI, Path, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app import replay
+from app.comment_review_store import CommentReviewStore
 from app.config import Settings, get_settings
 from app.graph_client import GraphAPIError, GraphClient
 from app.keyword import contains_keyword
+from app.outbound_message_store import OutboundMessageStore
+from app.platform_utils import facebook_graph_comment_id
 from app.processor import CommentProcessor
 from app.processor_factory import build_comment_processor
 from app.store import ProcessedCommentStore
@@ -39,6 +49,10 @@ COMMENT_ID_PATTERN = r"^[0-9]{1,40}(_[0-9]{1,40})?$"
 BATCH_SIZE = 20
 BATCH_TIME_BUDGET_S = 90
 GRAPH_TIMEOUT_S = 10
+REVIEW_TEXT_MAX = 2000
+META_MESSAGE_MAX = 300
+RELEASE_AFTER_MINUTES = 2
+TRANSIENT_META_CODES = {1, 2}
 
 CLOSE_REASONS = {
     "window_expired": "clos manuellement, fenêtre Meta dépassée",
@@ -106,6 +120,114 @@ class KeywordMatchBody(BaseModel):
 
     text: str = Field(min_length=1, max_length=2000)
     keywords: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(min_length=1, max_length=100)
+
+
+class ReviewReplyBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def _stripped_length(cls, value: str) -> str:
+        value = value.strip()
+        # len() counts code points, as `[...text].length` does on the console side.
+        if not 1 <= len(value) <= REVIEW_TEXT_MAX:
+            raise ValueError("text length")
+        return value
+
+
+def is_certain_refusal(error: BaseException) -> bool:
+    """A 4xx with a real, non-transient Meta code: nothing was published (ADR 042 §3)."""
+    if not isinstance(error, GraphAPIError):
+        return False
+    status = error.http_status
+    code = error.code
+    return (
+        isinstance(status, int)
+        and 400 <= status < 500
+        and isinstance(code, int)
+        and not isinstance(code, bool)
+        and code not in TRANSIENT_META_CODES
+    )
+
+
+def safe_meta_message(error: GraphAPIError, page_token: str) -> str:
+    message = error.meta_message if isinstance(error.meta_message, str) else ""
+    if page_token:
+        message = message.replace(page_token, "[redacted]")
+    return message[:META_MESSAGE_MAX]
+
+
+def _status_or(store: CommentReviewStore, platform: str, comment_id: str, fallback: str) -> str:
+    try:
+        return store.status_of(platform, comment_id) or fallback
+    except Exception:  # noqa: BLE001 - a failed re-read must not turn into a 500
+        return fallback
+
+
+async def review_reply(platform: str, comment_id: str, text: str, settings: Settings) -> JSONResponse:
+    store = CommentReviewStore(settings.processed_comments_database)
+    if store.status_of(platform, comment_id) is None:
+        return JSONResponse(status_code=404, content={"error": "unknown_item"})
+    # Opened before the claim: a failure here leaves the item untouched (no claim, no Graph call).
+    try:
+        OutboundMessageStore(settings.processed_comments_database)
+    except Exception as error:  # noqa: BLE001 - nothing claimed yet: a plain retryable error
+        logger.warning("review_reply_store_unavailable %s", type(error).__name__)
+        return JSONResponse(status_code=503, content={"error": "internal_error"})
+    if not store.claim_for_reply(platform, comment_id):
+        status = _status_or(store, platform, comment_id, "pending")
+        return JSONResponse(status_code=200, content={"result": "not_pending", "status": status})
+
+    recipient_id = facebook_graph_comment_id(comment_id) if platform == "facebook" else comment_id
+    try:
+        async with httpx.AsyncClient(timeout=GRAPH_TIMEOUT_S) as http_client:
+            graph_client = _graph_client_factory(settings, http_client)
+            if platform == "facebook":
+                result = await graph_client.reply_to_facebook_comment(recipient_id, text)
+            else:
+                result = await graph_client.reply_to_instagram_comment(recipient_id, text)
+    except Exception as error:  # noqa: BLE001 - every outcome after the claim is answered
+        if is_certain_refusal(error):
+            try:
+                store.release_after_error(platform, comment_id)
+            except Exception as release_error:  # noqa: BLE001
+                logger.warning("review_reply_uncertain %s", type(release_error).__name__)
+                status = _status_or(store, platform, comment_id, "sending")
+                return JSONResponse(status_code=200, content={"result": "uncertain", "status": status})
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "result": "graph_error",
+                    "status": _status_or(store, platform, comment_id, "pending"),
+                    "code": error.code,
+                    "subcode": error.subcode if isinstance(error.subcode, int) else None,
+                    "message": safe_meta_message(error, settings.meta_page_access_token),
+                },
+            )
+        logger.warning("review_reply_uncertain %s", type(error).__name__)
+        status = _status_or(store, platform, comment_id, "sending")
+        return JSONResponse(status_code=200, content={"result": "uncertain", "status": status})
+
+    result = result if isinstance(result, dict) else {}
+    posted_reply_id = str(result.get("id") or result.get("message_id") or "")
+    try:
+        store.complete_reply(
+            platform,
+            comment_id,
+            posted_reply_id=posted_reply_id,
+            text=text,
+            outbound={"recipient_id": recipient_id, "meta_response_id": posted_reply_id or None},
+        )
+    except Exception as error:  # noqa: BLE001 - published but not recorded: uncertain
+        logger.warning("review_reply_uncertain %s", type(error).__name__)
+        status = _status_or(store, platform, comment_id, "sending")
+        return JSONResponse(status_code=200, content={"result": "uncertain", "status": status})
+    status = _status_or(store, platform, comment_id, "replied")
+    return JSONResponse(
+        status_code=200, content={"result": "replied", "status": status, "posted_reply_id": posted_reply_id}
+    )
 
 
 def encode_cursor(sweep_started: str, after: tuple[str, str, str] | None) -> str:
@@ -275,6 +397,40 @@ def create_internal_app() -> FastAPI:
         if not store.close_manually(platform, comment_id, CLOSE_REASONS[body.reason]):
             return JSONResponse(status_code=409, content={"error": "not_closable"})
         return JSONResponse(status_code=200, content={"result": "closed", "status": "private_reply_blocked"})
+
+    @app.post("/internal/review/{platform}/{comment_id}/reply")
+    async def reply_review_item(
+        body: ReviewReplyBody,
+        platform: Platform,
+        comment_id: str = Path(pattern=COMMENT_ID_PATTERN),
+    ) -> JSONResponse:
+        return await review_reply(platform, comment_id, body.text, get_settings())
+
+    @app.post("/internal/review/{platform}/{comment_id}/skip")
+    async def skip_review_item(
+        platform: Platform,
+        comment_id: str = Path(pattern=COMMENT_ID_PATTERN),
+    ) -> JSONResponse:
+        store = CommentReviewStore(get_settings().processed_comments_database)
+        if store.status_of(platform, comment_id) is None:
+            return JSONResponse(status_code=404, content={"error": "unknown_item"})
+        if store.skip_pending(platform, comment_id):
+            return JSONResponse(status_code=200, content={"result": "skipped", "status": "skipped"})
+        status = _status_or(store, platform, comment_id, "pending")
+        return JSONResponse(status_code=200, content={"result": "not_pending", "status": status})
+
+    @app.post("/internal/review/{platform}/{comment_id}/release")
+    async def release_review_item(
+        platform: Platform,
+        comment_id: str = Path(pattern=COMMENT_ID_PATTERN),
+    ) -> JSONResponse:
+        store = CommentReviewStore(get_settings().processed_comments_database)
+        if store.status_of(platform, comment_id) is None:
+            return JSONResponse(status_code=404, content={"error": "unknown_item"})
+        if store.release_stale_sending(platform, comment_id, RELEASE_AFTER_MINUTES):
+            return JSONResponse(status_code=200, content={"result": "released", "status": "pending"})
+        status = _status_or(store, platform, comment_id, "sending")
+        return JSONResponse(status_code=200, content={"result": "not_releasable", "status": status})
 
     return app
 

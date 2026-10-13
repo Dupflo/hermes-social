@@ -16,10 +16,21 @@ COMMENT_FIELDS_FACEBOOK = "message,created_time,from"
 class GraphAPIError(RuntimeError):
     """Raised when Meta Graph API returns an error response."""
 
-    def __init__(self, message: str, *, code: int | None = None, subcode: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: int | None = None,
+        subcode: int | None = None,
+        meta_message: str | None = None,
+        http_status: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.subcode = subcode
+        # s15 (console ADR 042): raw Meta `error.message` (never an HTML fallback) and HTTP status.
+        self.meta_message = meta_message
+        self.http_status = http_status
 
     @property
     def blocks_private_reply(self) -> bool:
@@ -145,5 +156,7 @@ class GraphClient:
                 f"Meta Graph API error {code}" + (f"/{subcode}" if subcode else "") + f": {message}",
                 code=code,
                 subcode=subcode,
+                meta_message=error.get("message"),
+                http_status=response.status_code,
             )
         return data

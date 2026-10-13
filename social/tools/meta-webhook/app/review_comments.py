@@ -75,6 +75,8 @@ async def post_review_reply(
         return "Déjà répondu manuellement sur la plateforme."
     if item.status == "replied":
         return "Déjà répondu via Hermes."
+    if item.status == "sending":
+        return "Envoi en cours depuis la console."
     if platform.endswith("_dm"):
         if not item.username:
             return "Impossible de répondre au DM : identifiant destinataire manquant."
@@ -143,8 +145,11 @@ def _record_outbound(
 
 
 def skip_review_item(store: CommentReviewStore, platform: str, comment_id: str) -> str:
-    if store.get(platform, comment_id) is None:
+    item = store.get(platform, comment_id)
+    if item is None:
         return "Commentaire introuvable dans la file."
+    if item.status == "sending":
+        return "Envoi en cours depuis la console."
     store.mark_skipped(platform, comment_id)
     return "Commentaire ignoré ✅"
 

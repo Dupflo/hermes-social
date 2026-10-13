@@ -221,6 +221,122 @@ class CommentReviewStore(SQLiteStore):
             "comment_permalink": item.comment_permalink,
         }
 
+    # --- s15 (console ADR 042): conditional transitions used by /internal/review/* ----------
+    # `sending` is the console's claim: a public reply goes out only after
+    # `pending|in_review -> sending` touched exactly one row. Existing methods stay as they are.
+
+    def claim_for_reply(self, platform: str, comment_id: str) -> bool:
+        return self._conditional_update(
+            """
+            UPDATE comment_review_items
+            SET status = 'sending', updated_at = CURRENT_TIMESTAMP
+            WHERE platform = ? AND comment_id = ? AND status IN ('pending', 'in_review')
+            """,
+            (platform, comment_id),
+        )
+
+    def complete_reply(
+        self,
+        platform: str,
+        comment_id: str,
+        *,
+        posted_reply_id: str | None,
+        text: str,
+        outbound: dict,
+    ) -> bool:
+        """Record the send then mark `replied`, in one transaction.
+
+        The send is recorded even if another writer changed the status meanwhile (the reply
+        is public by now); `in_review` covers an unconditional `mark_in_review` of the CLI.
+        """
+        text = text.strip()
+        connection = self._immediate()
+        try:
+            connection.execute(
+                """
+                INSERT INTO outbound_messages (
+                    platform, source_type, source_id, recipient_id,
+                    message_type, message_text, meta_response_id, status
+                ) VALUES (?, 'manual_review', ?, ?, 'public_reply', ?, ?, 'sent')
+                """,
+                (platform, comment_id, outbound.get("recipient_id"), text, outbound.get("meta_response_id")),
+            )
+            cursor = connection.execute(
+                """
+                UPDATE comment_review_items
+                SET status = 'replied', posted_reply_id = ?, suggested_reply = ?,
+                    reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE platform = ? AND comment_id = ? AND status IN ('sending', 'in_review')
+                """,
+                (posted_reply_id, text, platform, comment_id),
+            )
+            connection.execute("COMMIT")
+            return cursor.rowcount == 1
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
+    def release_after_error(self, platform: str, comment_id: str) -> bool:
+        return self._conditional_update(
+            """
+            UPDATE comment_review_items
+            SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+            WHERE platform = ? AND comment_id = ? AND status = 'sending'
+            """,
+            (platform, comment_id),
+        )
+
+    def skip_pending(self, platform: str, comment_id: str) -> bool:
+        return self._conditional_update(
+            """
+            UPDATE comment_review_items
+            SET status = 'skipped', reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE platform = ? AND comment_id = ? AND status IN ('pending', 'in_review')
+            """,
+            (platform, comment_id),
+        )
+
+    def release_stale_sending(self, platform: str, comment_id: str, older_than_minutes: int = 2) -> bool:
+        return self._conditional_update(
+            """
+            UPDATE comment_review_items
+            SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+            WHERE platform = ? AND comment_id = ? AND status = 'sending'
+              AND updated_at < datetime('now', ?)
+            """,
+            (platform, comment_id, f"-{int(older_than_minutes)} minutes"),
+        )
+
+    def status_of(self, platform: str, comment_id: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT status FROM comment_review_items WHERE platform = ? AND comment_id = ?",
+                (platform, comment_id),
+            ).fetchone()
+        return str(row[0]) if row else None
+
+    def _immediate(self):
+        connection = self._connect()
+        connection.isolation_level = None
+        connection.execute("BEGIN IMMEDIATE")
+        return connection
+
+    def _conditional_update(self, sql: str, params: tuple) -> bool:
+        connection = self._immediate()
+        try:
+            cursor = connection.execute(sql, params)
+            connection.execute("COMMIT")
+            return cursor.rowcount == 1
+        except BaseException:
+            if connection.in_transaction:
+                connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
     def _update_status(self, platform: str, comment_id: str, status: str, *, reviewed: bool = False) -> None:
         reviewed_sql = ", reviewed_at = CURRENT_TIMESTAMP" if reviewed else ""
         with self._connect() as connection:
