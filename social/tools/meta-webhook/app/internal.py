@@ -447,10 +447,12 @@ async def conversation_reply(body: ConversationReplyBody, conversation_id: str, 
     try:
         keys = DirectReplyStore(settings.processed_comments_database)
         outbound = OutboundMessageStore(settings.processed_comments_database)
+        # A claim that raises rolls back (DirectReplyStore.claim): nothing taken, nothing sent.
+        claimed = keys.claim(body.key, body.platform)
     except Exception as error:  # noqa: BLE001 - nothing claimed yet: a plain retryable error
         logger.warning("dm_reply_store_unavailable %s", type(error).__name__)
         return JSONResponse(status_code=503, content={"error": "internal_error"})
-    if not keys.claim(body.key, body.platform):
+    if not claimed:
         return JSONResponse(status_code=200, content={"result": "duplicate", "status": _key_status(keys, body.key)})
 
     text = body.text.strip()

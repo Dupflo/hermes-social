@@ -1955,6 +1955,23 @@ def test_store_unavailable_before_the_claim_is_503_without_graph(env, dm, monkey
     assert dm.calls == []
 
 
+def test_a_claim_that_raises_is_a_certain_503_without_graph(env, dm, monkeypatch, caplog):
+    # Console review n°1 (m1): the claim rolls back, nothing is taken nor sent: a certain
+    # failure (console `dm_unavailable`, key kept), never a 500 read as uncertain.
+    def boom(self, key, platform):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(DirectReplyStore, "claim", boom)
+    response = TestClient(internal.app, raise_server_exceptions=False).post(
+        "/internal/conversations/reply", headers=AUTH, json=reply_body()
+    )
+    assert response.status_code == 503
+    assert response.json() == {"error": "internal_error"}
+    assert dm.calls == []
+    assert dm_rows(env) == []
+    assert "dm_reply_store_unavailable OperationalError" in caplog.text
+
+
 # Meta errors with the real GraphClient on a MockTransport (AC 4)
 
 
