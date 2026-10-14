@@ -361,6 +361,42 @@ class TikTokBackofficeStore:
                 )
         return {"ingested": ingested, "created_reviews": created_reviews}
 
+    # --- s23 (console ADR 054): scan job helpers, additive; poll_targets and ingest_comments are unchanged ---
+
+    def mark_scan_attempt(self, video_url: str, *, at: str | None = None) -> bool:
+        """Date a scan attempt (success, empty or failure) so poll_targets rotates its head (D9)."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE tiktok_videos SET last_scanned_at = COALESCE(?, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE video_url = ?",
+                (at, video_url),
+            )
+        return cursor.rowcount > 0
+
+    def pending_review_items(self, limit: int) -> list[dict]:
+        # Verbatim copy of pending_items() of scripts/tiktok_cron_auto_dm.py (l. 43-53): same queue, no filter (D2).
+        with self._connect() as connection:
+            rows = connection.execute(
+                '''
+        SELECT ri.id, ri.status, ri.campaign_slug, ri.matched_keyword, ri.failure_reason,
+               c.author, c.text AS comment_text, c.video_url
+        FROM tiktok_review_items ri
+        JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+        WHERE ri.status = 'pending_review'
+          AND ri.campaign_slug != 'guide'
+          AND c.author LIKE '@%'
+        ORDER BY ri.created_at ASC, ri.id ASC
+        LIMIT ?
+        ''',
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def review_status_counts(self) -> dict[str, int]:
+        # Same query as status_counts() of scripts/tiktok_cron_auto_dm.py (l. 59).
+        with self._connect() as connection:
+            rows = connection.execute('SELECT status, COUNT(*) n FROM tiktok_review_items GROUP BY status').fetchall()
+        return {row['status']: row['n'] for row in rows}
+
     def add_comment(self, comment: TikTokComment) -> bool:
         with self._connect() as connection:
             cursor = connection.execute(

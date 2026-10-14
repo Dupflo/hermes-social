@@ -9,7 +9,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
+
+from app.captcha_selectors import PRESENT_JS
 
 
 DEFAULT_CAMOFOX_BASE_URL = "http://camofox:9377"
@@ -710,24 +712,88 @@ def fetch_comments_from_camofox(
     user_id: str | None = None,
     session_key: str = "tiktok-comments-fetch",
     wait_seconds: float = 8.0,
+    client: CamofoxClient | None = None,
+    on_captcha: Callable[[str], bool] | None = None,
+    expired: Callable[[], bool] | None = None,
+    close_tab: bool = False,
+    sleep: Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
-    # s20: defaults come from the environment (CAMOFOX_URL, CAMOFOX_USER_ID, CAMOFOX_API_KEY);
-    # explicit values keep priority.
-    client = CamofoxClient.from_env()
-    if base_url:
-        client = replace(client, base_url=base_url)
-    if user_id:
-        client = replace(client, user_id=user_id)
+    """Read the visible comments of one video.
+
+    s23 (console ADR 054, P3): the keyword options are additive. With their defaults the behaviour is the CLI /
+    legacy cron one (no captcha probe, tab left open, text-regex captcha flag). With `on_captcha`, the captcha
+    selectors (`captcha_selectors.PRESENT_JS`) are probed at the start of every attempt and before every reload; a
+    captcha goes to `on_captcha(tab_id)` in the current tab (True => go on without that reload, False =>
+    `captcha_unsolved`). `expired()` true => `video_timeout`. `close_tab` deletes the tab at the end, errors
+    swallowed. `client` given => `base_url`/`user_id` ignored.
+    """
+    if client is None:
+        # s20: defaults come from the environment (CAMOFOX_URL, CAMOFOX_USER_ID, CAMOFOX_API_KEY);
+        # explicit values keep priority.
+        client = CamofoxClient.from_env()
+        if base_url:
+            client = replace(client, base_url=base_url)
+        if user_id:
+            client = replace(client, user_id=user_id)
+    tab: dict[str, str | None] = {"id": None}
+    try:
+        return _fetch_comments_in_tab(
+            client,
+            tab,
+            video_url=video_url,
+            session_key=session_key,
+            wait_seconds=wait_seconds,
+            on_captcha=on_captcha,
+            expired=expired,
+            # Resolved at call time, so monkeypatching camofox_reader.time.sleep keeps working.
+            pause=sleep if sleep is not None else time.sleep,
+        )
+    finally:
+        if close_tab and tab["id"] is not None:
+            try:
+                client.delete_tab(tab["id"], timeout=10)
+            except Exception:  # noqa: BLE001 - closing is best effort, the result stands
+                pass
+
+
+def _fetch_comments_in_tab(
+    client: Any,
+    tab: dict[str, str | None],
+    *,
+    video_url: str,
+    session_key: str,
+    wait_seconds: float,
+    on_captcha: Callable[[str], bool] | None,
+    expired: Callable[[], bool] | None,
+    pause: Callable[[float], None],
+) -> dict[str, Any]:
     activation_result: Any = None
     activation_errors: list[str] = []
     dom_result: dict[str, Any] | None = None
     comments: list[dict[str, str]] = []
     coherence: dict[str, Any] | None = None
+    captcha_present = False  # last PRESENT_JS probe (scan mode only)
+
+    def captcha_in_the_way(tab_id: str) -> bool | None:
+        """Scan mode: probe the selectors; None = no captcha, True = solved, False = unsolved."""
+        nonlocal captcha_present
+        captcha_present = client.evaluate(tab_id=tab_id, expression=PRESENT_JS) is True
+        if not captcha_present:
+            return None
+        solved = bool(on_captcha(tab_id))
+        captcha_present = not solved
+        return solved
+
     try:
         tab_id = client.create_tab(session_key=session_key, url=video_url)
+        tab["id"] = tab_id
         if wait_seconds > 0:
-            time.sleep(wait_seconds)
+            pause(wait_seconds)
         for attempt in range(3):
+            if expired is not None and expired():
+                return {"ok": False, "error": "video_timeout", "comments": []}
+            if on_captcha is not None and captcha_in_the_way(tab_id) is False:
+                return {"ok": False, "error": "captcha_unsolved", "comments": []}
             activation_errors = []
             # Generic text selectors are unsafe on TikTok: they can select the
             # adjacent/right-rail recommendation tab ("You may like") while still
@@ -737,7 +803,7 @@ def fetch_comments_from_camofox(
             if isinstance(activation_result, dict):
                 activation_result["fallback"] = "js_click_scoped_comments_panel"
                 activation_result["click_errors"] = activation_errors
-            time.sleep(2.0)
+            pause(2.0)
             raw_dom_result = client.evaluate(tab_id=tab_id, expression=_COMMENT_EXTRACTION_JS)
             if not isinstance(raw_dom_result, dict):
                 return {"ok": False, "error": "unexpected_camofox_result", "comments": []}
@@ -747,14 +813,25 @@ def fetch_comments_from_camofox(
             if coherence.get("coherent"):
                 break
             if attempt < 2:
+                if expired is not None and expired():
+                    return {"ok": False, "error": "video_timeout", "comments": []}
+                if on_captcha is not None:
+                    solved = captcha_in_the_way(tab_id)
+                    if solved is False:
+                        return {"ok": False, "error": "captcha_unsolved", "comments": []}
+                    if solved is True:
+                        continue  # never reload a page that just had a captcha: go on in the same tab
                 client.evaluate(tab_id=tab_id, expression=_reload_target_video_expression(video_url, attempt + 1))
-                time.sleep(max(wait_seconds, 6.0))
+                pause(max(wait_seconds, 6.0))
     except (urllib.error.URLError, CamofoxUnreachable, CamofoxHTTPError) as exc:
         return {"ok": False, "error": "camofox_unreachable", "detail": str(exc), "comments": []}
     except Exception as exc:
         return {"ok": False, "error": "camofox_fetch_failed", "detail": str(exc), "comments": []}
     if dom_result is None:
         return {"ok": False, "error": "unexpected_camofox_result", "comments": []}
+    # Scan mode: the flag comes from the last selector probe, never from the text regex (a comment saying
+    # "verify" is not a captcha).
+    captcha_flag = captcha_present if on_captcha is not None else bool(dom_result.get("captcha"))
     expected_comment_count = _expected_comment_count_from_activation(activation_result)
     right_panel_recommendations = _right_panel_looks_like_recommendations(dom_result)
     diagnostics = {
@@ -775,11 +852,11 @@ def fetch_comments_from_camofox(
             "detail": coherence.get("reason"),
             "video_url": video_url,
             "logged_in": bool(dom_result.get("logged_in")),
-            "captcha": bool(dom_result.get("captcha")),
+            "captcha": captcha_flag,
             "comments": [],
             "diagnostics": diagnostics,
         }
-    if bool(dom_result.get("captcha")):
+    if captcha_flag:
         return {
             "ok": False,
             "error": "captcha_required",
@@ -797,7 +874,7 @@ def fetch_comments_from_camofox(
             "detail": "TikTok did not expose a logged-in/comment-readable page",
             "video_url": video_url,
             "logged_in": False,
-            "captcha": bool(dom_result.get("captcha")),
+            "captcha": captcha_flag,
             "comments": [],
             "diagnostics": diagnostics,
         }
@@ -808,7 +885,7 @@ def fetch_comments_from_camofox(
             "detail": "TikTok related/recommendation tab is active instead of Comments",
             "video_url": video_url,
             "logged_in": bool(dom_result.get("logged_in")),
-            "captcha": bool(dom_result.get("captcha")),
+            "captcha": captcha_flag,
             "comments": [],
             "diagnostics": diagnostics,
         }
@@ -819,7 +896,7 @@ def fetch_comments_from_camofox(
             "detail": "TikTok right panel shows recommendations instead of comment rows",
             "video_url": video_url,
             "logged_in": bool(dom_result.get("logged_in")),
-            "captcha": bool(dom_result.get("captcha")),
+            "captcha": captcha_flag,
             "comments": [],
             "diagnostics": diagnostics,
         }
@@ -830,7 +907,7 @@ def fetch_comments_from_camofox(
             "detail": f"TikTok reports {expected_comment_count} comments but DOM/API extraction returned zero",
             "video_url": video_url,
             "logged_in": bool(dom_result.get("logged_in")),
-            "captcha": bool(dom_result.get("captcha")),
+            "captcha": captcha_flag,
             "comments": [],
             "diagnostics": diagnostics,
         }
@@ -838,7 +915,7 @@ def fetch_comments_from_camofox(
         "ok": True,
         "video_url": video_url,
         "logged_in": bool(dom_result.get("logged_in")),
-        "captcha": bool(dom_result.get("captcha")),
+        "captcha": captcha_flag,
         "comments": comments,
         "diagnostics": diagnostics,
     }
