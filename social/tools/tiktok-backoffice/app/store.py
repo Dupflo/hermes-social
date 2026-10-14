@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import time
 from pathlib import Path
 import re
 from typing import Literal
@@ -41,6 +42,28 @@ def _caption_has_comment_cta_keyword(caption: str, keyword: str) -> bool:
 def _comment_fingerprint(*, video_url: str, author: str | None, text: str, created_time: object | None = None) -> str:
     material = "\u241f".join([video_url, author or "", text, "" if created_time is None else str(created_time)])
     return "fp:" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:32]
+
+
+def sqlite_utc(epoch: float) -> str:
+    """UTC text `YYYY-MM-DD HH:MM:SS`, the format of SQLite's CURRENT_TIMESTAMP (s24, console ADR 055/056)."""
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(epoch))
+
+
+# s24 (console ADR 055, B3/P15): the reply queue = the legacy queue filter, restricted to items ingested by a
+# console read after the console baseline of their video.
+_QUEUE_FILTER = """
+    ri.status = 'pending_review'
+    AND ri.campaign_slug != 'guide'
+    AND c.author LIKE '@%'
+"""
+_ELIGIBLE = """
+    EXISTS (
+        SELECT 1 FROM tiktok_videos v
+        WHERE v.video_url = c.video_url
+          AND v.baseline_at IS NOT NULL
+          AND ri.created_at >= v.baseline_at
+    )
+"""
 
 
 def _normalize_comment_text(text: str) -> str:
@@ -247,10 +270,20 @@ class TikTokBackofficeStore:
         return targets
 
 
-    def ingest_comments(self, *, video_url: str, comments: list[dict]) -> dict:
+    def ingest_comments(
+        self, *, video_url: str, comments: list[dict], console_read: bool = False, baseline: bool = False
+    ) -> dict:
+        # s24 (console ADR 055, P7/S1): `console_read=True` dates the video's console baseline inside this same
+        # transaction, before any insert (a failed ingestion sets nothing); `baseline=True` creates every review
+        # item closed (`expired` / `first_scan_baseline`). Defaults = the pre-s24 behaviour, byte for byte.
         ingested = 0
         created_reviews = 0
         with self._connect() as connection:
+            if console_read:
+                connection.execute(
+                    "UPDATE tiktok_videos SET baseline_at = COALESCE(baseline_at, CURRENT_TIMESTAMP) WHERE video_url = ?",
+                    (video_url,),
+                )
             video = connection.execute("SELECT video_id FROM tiktok_videos WHERE video_url = ?", (video_url,)).fetchone()
             video_id = video["video_id"] if video else _video_id_from_url(video_url)
             campaign_rows = connection.execute(
@@ -338,6 +371,8 @@ class TikTokBackofficeStore:
                         else "needs_manual_handle"
                     )
                     failure_reason = None if review_status == ReviewItemStatus.PENDING_REVIEW else "TikTok scanner captured display name only; exact @handle is required before DM."
+                    if baseline:
+                        review_status, failure_reason = "expired", "first_scan_baseline"
                     review_cursor = connection.execute(
                         """
                         INSERT OR IGNORE INTO tiktok_review_items (
@@ -397,6 +432,175 @@ class TikTokBackofficeStore:
             rows = connection.execute('SELECT status, COUNT(*) n FROM tiktok_review_items GROUP BY status').fetchall()
         return {row['status']: row['n'] for row in rows}
 
+    # --- s24 (console ADR 055): reply job helpers, additive; pending_review_items is unchanged ---
+
+    def reply_queue(self, limit: int) -> list[dict]:
+        """The legacy queue (same filter and order as pending_review_items), eligible items only (B3)."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT ri.id, ri.comment_id, ri.campaign_slug, ri.matched_keyword, ri.reply_text, ri.created_at,
+                       c.author, c.text AS comment_text, c.video_url,
+                       CASE WHEN tc.slug IS NULL THEN 0 ELSE 1 END AS campaign_found,
+                       COALESCE(tc.active, 0) AS campaign_active,
+                       tc.dm_text
+                FROM tiktok_review_items ri
+                JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+                LEFT JOIN tiktok_campaigns tc ON tc.slug = ri.campaign_slug
+                WHERE {_QUEUE_FILTER} AND {_ELIGIBLE}
+                ORDER BY ri.created_at ASC, ri.id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def _close_queue_items(self, condition: str, reason: str, params: tuple = ()) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE tiktok_review_items
+                SET status = 'expired', failure_reason = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id IN (
+                    SELECT ri.id FROM tiktok_review_items ri
+                    JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+                    WHERE {_QUEUE_FILTER} AND {condition}
+                )
+                """,
+                (reason, *params),
+            )
+        return cursor.rowcount
+
+    def expire_stale_pending(self, cutoff: str) -> int:
+        """Close queue items ingested before `cutoff` (7 days, D3); no TikTok action."""
+        return self._close_queue_items("ri.created_at < ?", "older_than_7d", (cutoff,))
+
+    def expire_legacy_backlog(self) -> int:
+        """Close queue items that are not eligible (B3: ingested by the legacy path); no TikTok action."""
+        return self._close_queue_items(f"NOT {_ELIGIBLE}", "legacy_backlog")
+
+    def claim_review_item(self, review_id: int, cutoff: str) -> bool:
+        """`pending_review` -> `sending`, conditional (D8): True only for the one caller that moved it."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE tiktok_review_items
+                SET status = 'sending', failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'pending_review' AND created_at >= ?
+                  AND id IN (
+                    SELECT ri.id FROM tiktok_review_items ri
+                    JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+                    WHERE ri.id = ? AND {_ELIGIBLE}
+                  )
+                """,
+                (review_id, cutoff, review_id),
+            )
+        return cursor.rowcount == 1
+
+    def release_review_item(self, review_id: int) -> bool:
+        """`sending` -> `pending_review` (no action was attempted for the item in this run)."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE tiktok_review_items
+                SET status = 'pending_review', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'sending'
+                """,
+                (review_id,),
+            )
+        return cursor.rowcount == 1
+
+    def finish_review_item(self, review_id: int, status: str, *, reason: str | None) -> bool:
+        """Status only (S3), and only while the item is still `sending`; outbound rows are never touched."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE tiktok_review_items
+                SET status = ?, failure_reason = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND status = 'sending'
+                """,
+                (status, reason, review_id),
+            )
+        return cursor.rowcount == 1
+
+    def record_outbound(self, *, review_id: int, recipient: str | None, message_type: str, text: str, status: str) -> int:
+        """One row per clicked action (D6), written right after its verification, independent of the status."""
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO tiktok_outbound_messages (
+                    platform, source_type, source_id, recipient_id, message_type, message_text, meta_response_id, status
+                ) VALUES ('tiktok', 'comment', ?, ?, ?, ?, NULL, ?)
+                """,
+                (str(review_id), recipient, message_type, text, status),
+            )
+        if cursor.lastrowid is None:
+            raise RuntimeError("Failed to record outbound message")
+        return cursor.lastrowid
+
+    def outbound_count_since(self, cutoff: str) -> int:
+        """Actions (all statuses) after `cutoff`: the sliding-hour budget (D7)."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM tiktok_outbound_messages WHERE platform = 'tiktok' AND created_at > ?",
+                (cutoff,),
+            ).fetchone()
+        return int(row[0])
+
+    def sent_outbound_types(self, review_id: int) -> set[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT message_type FROM tiktok_outbound_messages
+                WHERE platform = 'tiktok' AND source_id = ? AND status = 'sent'
+                """,
+                (str(review_id),),
+            ).fetchall()
+        return {row[0] for row in rows}
+
+    def reply_check_counts(self, cutoff: str) -> dict[str, int]:
+        """Read-only counts of `tiktok-reply --check-only` (H7): what a run would leave, expire and close."""
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT
+                    COALESCE(SUM(CASE WHEN ri.created_at >= ? AND {_ELIGIBLE} THEN 1 ELSE 0 END), 0) AS pending,
+                    COALESCE(SUM(CASE WHEN ri.created_at < ? THEN 1 ELSE 0 END), 0) AS expirable,
+                    COALESCE(SUM(CASE WHEN ri.created_at >= ? AND NOT {_ELIGIBLE} THEN 1 ELSE 0 END), 0) AS legacy_backlog
+                FROM tiktok_review_items ri
+                JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+                WHERE {_QUEUE_FILTER}
+                """,
+                (cutoff, cutoff, cutoff),
+            ).fetchone()
+            campaigns = connection.execute(
+                """
+                SELECT COUNT(*) AS active,
+                       COALESCE(SUM(CASE WHEN TRIM(COALESCE(dm_text, '')) != '' THEN 1 ELSE 0 END), 0) AS with_dm
+                FROM tiktok_campaigns WHERE active = 1
+                """
+            ).fetchone()
+        return {
+            "pending": int(row["pending"]),
+            "expirable": int(row["expirable"]),
+            "legacy_backlog": int(row["legacy_backlog"]),
+            "dm_text_campaigns": int(campaigns["with_dm"]),
+            "active_campaigns": int(campaigns["active"]),
+        }
+
+    def needs_baseline(self, video_url: str) -> bool:
+        """First console read of a never-read video (P7): no baseline yet and no comment ingested for it."""
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    (SELECT baseline_at FROM tiktok_videos WHERE video_url = ?) AS baseline_at,
+                    EXISTS (SELECT 1 FROM tiktok_comments WHERE video_url = ?) AS has_comments
+                """,
+                (video_url, video_url),
+            ).fetchone()
+        return row["baseline_at"] is None and not row["has_comments"]
+
     def add_comment(self, comment: TikTokComment) -> bool:
         with self._connect() as connection:
             cursor = connection.execute(
@@ -452,16 +656,17 @@ class TikTokBackofficeStore:
                 return "skipped_console"
             connection.execute(
                 """
-                INSERT INTO tiktok_campaigns (slug, name, reply_template, active)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO tiktok_campaigns (slug, name, reply_template, active, dm_text)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(slug) DO UPDATE SET
                     name = excluded.name,
                     reply_template = excluded.reply_template,
                     active = excluded.active,
+                    dm_text = excluded.dm_text,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE tiktok_campaigns.source != 'console'
                 """,
-                (campaign.slug, campaign.name, campaign.reply_template, int(campaign.active)),
+                (campaign.slug, campaign.name, campaign.reply_template, int(campaign.active), campaign.dm_text),
             )
             connection.execute("DELETE FROM tiktok_campaign_keywords WHERE campaign_slug = ?", (campaign.slug,))
             connection.executemany(
@@ -878,3 +1083,30 @@ class TikTokBackofficeStore:
                 connection.execute("ALTER TABLE tiktok_campaigns ADD COLUMN source TEXT NOT NULL DEFAULT 'kanban'")
             if "dm_text" not in campaign_columns:
                 connection.execute("ALTER TABLE tiktok_campaigns ADD COLUMN dm_text TEXT")
+            # s24 (console ADR 055): the reply job's sends, with exactly the columns of meta-webhook's
+            # outbound_messages (D6), and the console baseline of each video (P7). Additive only.
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tiktok_outbound_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    recipient_id TEXT,
+                    message_type TEXT NOT NULL,
+                    message_text TEXT NOT NULL,
+                    meta_response_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'sent',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_tiktok_outbound_messages_source
+                ON tiktok_outbound_messages(platform, source_id)
+                """
+            )
+            video_columns = {row[1] for row in connection.execute("PRAGMA table_info(tiktok_videos)")}
+            if "baseline_at" not in video_columns:
+                connection.execute("ALTER TABLE tiktok_videos ADD COLUMN baseline_at TEXT")

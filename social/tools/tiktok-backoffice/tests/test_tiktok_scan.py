@@ -1,13 +1,15 @@
 """s23 — app.tiktok_scan: the console job `tiktok-scan` (console ADR 054).
 
-Dependencies injected: real store on a temporary base, fake fetch, fake processor, fake solver, simulated clock.
-No network, no Camofox, and the versioned processor is never run (its runner is always a fake).
+Dependencies injected: real store on a temporary base, fake fetch, fake solver, simulated clock.
+No network, no Camofox. s24 : épingle amendée (processeur retiré du scan, console ADR 055) — the scan no longer
+touches the review queue; its processor tests are removed and listed in the PR description.
 """
+
+import inspect
 
 import json
 import os
 import sqlite3
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -105,23 +107,6 @@ class Fetch:
         return ok_fetch((("@alice", f"proxy {url[-4:]}"),))
 
 
-class Processor:
-    def __init__(self, clock=None, advance=0.0, stage="processed", ok=True):
-        self.ids = []
-        self.starts = []
-        self.clock = clock
-        self.advance = advance
-        self.stage = stage
-        self.ok = ok
-
-    def __call__(self, review_id):
-        self.ids.append(review_id)
-        if self.clock is not None:
-            self.starts.append(self.clock())
-            self.clock.advance(self.advance)
-        return {"id": review_id, "rc": 0, "stage": self.stage, "ok": self.ok}
-
-
 class Solver:
     def __init__(self, report, clock, outcomes, spend=0.0):
         self.report = report
@@ -140,7 +125,7 @@ class Solver:
         return outcome
 
 
-def run(store, *, clock=None, fetch=None, processor=None, tabs=lambda: 1, legacy_running=lambda: False,
+def run(store, *, clock=None, fetch=None, tabs=lambda: 1, legacy_running=lambda: False,
         legacy_imminent=lambda bound: False, solve=None, report=None):
     clock = clock or Clock()
     report = report if report is not None else CaptchaReport()
@@ -148,7 +133,6 @@ def run(store, *, clock=None, fetch=None, processor=None, tabs=lambda: 1, legacy
         store=store,
         fetch=fetch or Fetch(clock),
         tabs_count=tabs,
-        process_one=processor or Processor(),
         legacy_running=legacy_running,
         legacy_imminent=legacy_imminent,
         solve=solve or Solver(report, clock, []),
@@ -167,25 +151,118 @@ def output_of(result, report=None):
 # --- P1 table -------------------------------------------------------------------------------------------------------
 
 
-def test_nominal_run_scans_then_processes_the_queue(tmp_path):
-    store = make_store(tmp_path, videos=2, items=3)
-    processor = Processor()
-    queue = pending_ids(store)[:3]
+def statuses(store):
+    with sqlite3.connect(store.database) as connection:
+        return connection.execute("SELECT id, status, failure_reason FROM tiktok_review_items ORDER BY id").fetchall()
 
-    result = run(store, processor=processor)
+
+def test_nominal_run_scans_and_leaves_the_queue_alone(tmp_path):
+    store = make_store(tmp_path, videos=2, items=3)
+    before = statuses(store)
+
+    result = run(store)
 
     assert (result.status, result.reason, result.exit_code) == ("ok", None, 0)
-    assert processor.ids == queue
     c = result.counters
     assert c["videos_targeted"] == 2 and c["videos_ok"] == 2 and c["videos_failed"] == 0
     assert c["comments_extracted"] == 2 and c["comments_new"] == 2 and c["reviews_created"] == 2
-    assert c["items_selected"] == 3 and c["items_ok"] == 3 and c["items_failed"] == 0
-    assert c["queue_skipped"] == 0 and c["videos_skipped"] == 0
-    assert c["pending_after"] == 5
+    assert c["reviews_baseline"] == 2  # both videos are read for the first time (P7)
+    assert c["videos_skipped"] == 0
+    assert c["pending_after"] == 3
     assert set(c) == set(ts.COUNTERS)
     assert [v["id"] for v in result.videos] == ["7000", "7001"]
-    assert result.videos[0] == {"id": "7000", "extracted": 1, "new": 1, "reviews": 1, "error": None}
+    assert result.videos[0] == {"id": "7000", "extracted": 1, "new": 1, "reviews": 1, "error": None, "baseline": 1}
     assert all(last_scanned(store, video_url(i)) for i in range(2))
+    assert statuses(store)[: len(before)] == before  # existing items untouched
+
+
+def test_run_scan_has_no_processor_parameter():
+    assert "process_one" not in inspect.signature(ts.run_scan).parameters
+
+
+def test_scan_source_never_names_the_processor_nor_the_queue():
+    source = Path(ts.__file__).read_text(encoding="utf-8")
+    for needle in ("process_tiktok_review_one", "subprocess", "pending_review_items"):
+        assert needle not in source
+
+
+def test_scan_leaves_every_pending_item_status_unchanged(tmp_path):
+    store = make_store(tmp_path, videos=2, items=3)
+    with sqlite3.connect(store.database) as connection:
+        connection.execute("UPDATE tiktok_review_items SET status = 'sending' WHERE id = 2")
+    before = statuses(store)
+    run(store)
+    run(store)
+    assert statuses(store)[: len(before)] == before
+
+
+def baseline_at(store, url):
+    with sqlite3.connect(store.database) as connection:
+        return connection.execute("SELECT baseline_at FROM tiktok_videos WHERE video_url = ?", (url,)).fetchone()[0]
+
+
+def new_items(store, url):
+    with sqlite3.connect(store.database) as connection:
+        return connection.execute(
+            """SELECT ri.status, ri.failure_reason FROM tiktok_review_items ri
+               JOIN tiktok_comments c ON c.comment_id = ri.comment_id WHERE c.video_url = ? ORDER BY ri.id""",
+            (url,),
+        ).fetchall()
+
+
+def test_first_read_is_a_baseline_then_the_second_read_creates_pending_items(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[ok_fetch((("@a", "proxy un"),)), ok_fetch((("@a", "proxy un"), ("@b", "proxy deux")))])
+
+    first = run(store, clock=clock, fetch=fetch)
+    assert first.videos[0]["baseline"] == 1 and first.counters["reviews_baseline"] == 1
+    assert baseline_at(store, video_url(0)) is not None
+    assert new_items(store, video_url(0)) == [("expired", "first_scan_baseline")]
+    assert "video 7000: extracted=1 new=1 reviews=1 error=- baseline=1" in ts.emit_lines(first)
+
+    second = run(store, clock=clock, fetch=fetch)
+    assert second.videos[0]["baseline"] == 0 and second.counters["reviews_baseline"] == 0
+    assert new_items(store, video_url(0)) == [("expired", "first_scan_baseline"), ("pending_review", None)]
+    assert [r["video_url"] for r in store.reply_queue(10)] == [video_url(0)]
+
+
+def test_video_with_legacy_comments_is_not_a_baseline_and_its_new_items_are_eligible(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    store.ingest_comments(video_url=video_url(0), comments=[{"author": "@old", "text": "bonjour"}])  # legacy path
+    assert baseline_at(store, video_url(0)) is None
+
+    result = run(store)
+
+    assert result.videos[0]["baseline"] == 0
+    assert baseline_at(store, video_url(0)) is not None
+    assert new_items(store, video_url(0)) == [("pending_review", None)]
+    assert len(store.reply_queue(10)) == 1
+
+
+def test_failed_fetch_sets_no_baseline(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    run(store, clock=clock, fetch=Fetch(clock, results=[{"ok": False, "error": "camofox_fetch_failed", "comments": []}]))
+    assert baseline_at(store, video_url(0)) is None
+    assert last_scanned(store, video_url(0)) is not None
+
+
+def test_failed_ingestion_sets_no_baseline(tmp_path, monkeypatch):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    result = run(store, clock=clock, fetch=Fetch(clock, results=[{"ok": True, "comments": [{"author": "@a", "text": "proxy"}, None]}]))
+    assert result.videos[0]["error"] == "ingest_failed"
+    assert baseline_at(store, video_url(0)) is None
+    assert new_items(store, video_url(0)) == []
+
+
+def test_read_with_zero_comments_sets_the_baseline(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    result = run(store, clock=clock, fetch=Fetch(clock, results=[{"ok": True, "comments": []}]))
+    assert result.videos[0]["error"] is None
+    assert baseline_at(store, video_url(0)) is not None
 
 
 def test_legacy_cron_running_at_start_touches_nothing(tmp_path):
@@ -194,13 +271,12 @@ def test_legacy_cron_running_at_start_touches_nothing(tmp_path):
             raise AssertionError(f"store.{name} called")
 
     fetch = Fetch(Clock())
-    processor = Processor()
 
-    result = run(Untouchable(), fetch=fetch, processor=processor, legacy_running=lambda: True)
+    result = run(Untouchable(), fetch=fetch, legacy_running=lambda: True)
 
     assert (result.status, result.reason, result.exit_code) == ("skipped", "legacy_cron_running", 0)
-    assert fetch.urls == [] and processor.ids == []
-    assert result.videos == [] and result.items == []
+    assert fetch.urls == []
+    assert result.videos == []
 
 
 def test_legacy_cron_due_before_the_second_video(tmp_path):
@@ -211,105 +287,80 @@ def test_legacy_cron_due_before_the_second_video(tmp_path):
         calls.append(bound)
         return len(calls) >= 2
 
-    processor = Processor()
-    result = run(store, processor=processor, legacy_imminent=imminent)
+    result = run(store, legacy_imminent=imminent)
 
     assert (result.status, result.reason, result.exit_code) == ("skipped", "legacy_cron_due", 0)
     assert calls == [ts.LEGACY_VIDEO_BOUND_S, ts.LEGACY_VIDEO_BOUND_S]
-    assert len(result.videos) == 1 and processor.ids == []
-    assert result.counters["videos_skipped"] == 1 and result.counters["queue_skipped"] == 1
+    assert len(result.videos) == 1
+    assert result.counters["videos_skipped"] == 1
     assert last_scanned(store, video_url(1)) is None
 
 
-def test_legacy_cron_due_before_the_second_item(tmp_path):
-    store = make_store(tmp_path, videos=1, items=3)
-    calls = []
-
-    def imminent(bound):
-        calls.append(bound)
-        return bound == ts.LEGACY_ITEM_BOUND_S and calls.count(bound) >= 2
-
-    processor = Processor()
-    result = run(store, processor=processor, legacy_imminent=imminent)
-
-    assert (result.status, result.reason, result.exit_code) == ("skipped", "legacy_cron_due", 0)
-    assert len(processor.ids) == 1
-    assert result.counters["queue_skipped"] == 2 and result.counters["items_selected"] == 3
-    assert "queue: skipped legacy_cron_due n=2" in ts.emit_lines(result)
-
-
-def test_legacy_guard_is_never_asked_after_the_last_item(tmp_path):
+def test_legacy_guard_is_never_asked_after_the_last_video(tmp_path):
     store = make_store(tmp_path, videos=2, items=3)
     calls = []
 
     def imminent(bound):
         calls.append(bound)
-        return len(calls) > 5  # 2 videos + 3 items: a 6th question would be after the run
+        return len(calls) > 2  # 2 videos: a 3rd question would be after the run
 
     result = run(store, legacy_imminent=imminent)
 
     assert (result.status, result.exit_code) == ("ok", 0)
-    assert calls == [ts.LEGACY_VIDEO_BOUND_S] * 2 + [ts.LEGACY_ITEM_BOUND_S] * 3
+    assert calls == [ts.LEGACY_VIDEO_BOUND_S] * 2
 
 
-def test_no_targets_is_skipped_but_the_queue_is_processed(tmp_path):
+def test_no_targets_is_skipped(tmp_path):
     store = make_store(tmp_path, videos=0, items=3)
-    processor = Processor()
+    before = statuses(store)
 
-    result = run(store, processor=processor)
+    result = run(store)
 
     assert (result.status, result.reason, result.exit_code) == ("skipped", "no_targets", 0)
-    assert len(processor.ids) == 3
+    assert statuses(store) == before
 
 
-def test_all_attempted_videos_failed_is_exit_17_and_the_queue_still_runs(tmp_path):
+def test_all_attempted_videos_failed_is_exit_17(tmp_path):
     store = make_store(tmp_path, videos=2, items=3)
     clock = Clock()
     fetch = Fetch(clock, results=[{"ok": False, "error": "camofox_unreachable", "detail": "SENTINEL_DETAIL", "comments": []}] * 2)
-    processor = Processor()
 
-    result = run(store, clock=clock, fetch=fetch, processor=processor)
+    result = run(store, clock=clock, fetch=fetch)
 
     assert (result.status, result.exit_code) == ("failed", 17)
-    assert len(processor.ids) == 3
     assert [v["error"] for v in result.videos] == ["camofox_unreachable"] * 2
     assert all(last_scanned(store, video_url(i)) for i in range(2))  # failures are dated too (D9)
 
 
-def test_session_lost_stops_the_scan_and_skips_the_queue(tmp_path):
+def test_session_lost_stops_the_scan(tmp_path):
     store = make_store(tmp_path, videos=3, items=3)
     clock = Clock()
     fetch = Fetch(clock, results=[ok_fetch(), {"ok": False, "error": "tiktok_page_not_actionable", "comments": []}])
-    processor = Processor()
 
-    result = run(store, clock=clock, fetch=fetch, processor=processor)
+    result = run(store, clock=clock, fetch=fetch)
 
     assert (result.status, result.exit_code) == ("failed", 20)
-    assert len(fetch.urls) == 2 and processor.ids == []
-    assert result.counters["videos_skipped"] == 1 and result.counters["queue_skipped"] == 1
+    assert len(fetch.urls) == 2
+    assert result.counters["videos_skipped"] == 1
 
 
-def test_tabs_full_on_the_second_video_stops_without_queue(tmp_path):
+def test_tabs_full_on_the_second_video_stops(tmp_path):
     store = make_store(tmp_path, videos=3, items=3)
     counts = iter([1, 9])
-    processor = Processor()
 
-    result = run(store, tabs=lambda: next(counts), processor=processor)
+    result = run(store, tabs=lambda: next(counts))
 
     assert (result.status, result.exit_code) == ("ok", 0)
     assert [v["error"] for v in result.videos] == [None, "tabs_full"]
-    assert processor.ids == []
     assert result.counters["videos_ok"] == 1 and result.counters["videos_failed"] == 1
 
 
 def test_tabs_full_on_the_first_video_is_exit_17(tmp_path):
     store = make_store(tmp_path, videos=2, items=3)
-    processor = Processor()
 
-    result = run(store, tabs=lambda: 9, processor=processor)
+    result = run(store, tabs=lambda: 9)
 
     assert (result.status, result.exit_code) == ("failed", 17)
-    assert processor.ids == []
 
 
 def test_tabs_listing_error_is_a_camofox_unreachable_video(tmp_path):
@@ -371,11 +422,10 @@ def test_slow_video_times_out_and_the_next_one_is_read(tmp_path):
             return {"ok": False, "error": "video_timeout", "comments": []}
         return ok_fetch()
 
-    processor = Processor()
-    result = run(store, clock=clock, fetch=Fetch(clock, script=script), processor=processor)
+    result = run(store, clock=clock, fetch=Fetch(clock, script=script))
 
     assert [v["error"] for v in result.videos] == ["video_timeout", None]
-    assert len(processor.ids) == 3 and result.status == "ok"
+    assert result.status == "ok"
 
 
 def test_scan_budget_no_video_starts_after_2160_s(tmp_path):
@@ -396,38 +446,6 @@ def test_scan_budget_no_video_starts_after_2160_s(tmp_path):
     assert len(starts) == 7  # 6 x 342 = 2052 s: the 7th starts, the 8th (2394 s) does not
     assert result.counters["videos_skipped"] == 1
     assert last_scanned(store, video_url(7)) is None  # not attempted, not dated: first in line next run
-
-
-@pytest.mark.parametrize(
-    ("elapsed", "started"),
-    [(3790, 0), (3700, 1)],
-)
-def test_an_item_only_starts_with_a_full_processor_window(tmp_path, elapsed, started):
-    store = make_store(tmp_path, videos=1, items=3)
-    clock = Clock()
-    fetch = Fetch(clock, advance=elapsed)
-    processor = Processor(clock, advance=600)
-
-    result = run(store, clock=clock, fetch=fetch, processor=processor)
-
-    assert len(processor.ids) == started
-    assert result.counters["queue_skipped"] == 3 - started
-    assert "queue: skipped budget n=%d" % (3 - started) in ts.emit_lines(result)
-
-
-def test_budget_grid_no_item_starts_without_600_s_before_the_run_budget(tmp_path):
-    for elapsed in range(0, int(ts.RUN_BUDGET_S) + 200, 100):
-        for duration in (5, 300, 600):
-            sub = tmp_path / f"{elapsed}-{duration}"
-            sub.mkdir()
-            store = make_store(sub, videos=1, items=3)
-            clock = Clock()
-            t0 = clock()
-            processor = Processor(clock, advance=duration)
-            run(store, clock=clock, fetch=Fetch(clock, advance=elapsed), processor=processor)
-            for start in processor.starts:
-                assert ts.RUN_BUDGET_S - (start - t0) >= ts.PROCESSOR_TIMEOUT_S + ts.ITEM_START_MARGIN_S
-                assert (start - t0) + ts.PROCESSOR_TIMEOUT_S <= ts.RUN_BUDGET_S
 
 
 # --- captchas -------------------------------------------------------------------------------------------------------
@@ -459,17 +477,16 @@ def test_solved_captcha_lets_the_video_be_read_and_its_time_is_suspended(tmp_pat
     assert tab == "tab-1" and deadline == pytest.approx(clock.t - 300 + ts.SOLVER_BUDGET_S)
 
 
-def test_unsolved_captcha_is_exit_18_without_queue(tmp_path):
+def test_unsolved_captcha_is_exit_18(tmp_path):
     store = make_store(tmp_path, videos=2, items=3)
     clock = Clock()
     report = CaptchaReport()
-    processor = Processor()
 
-    result = run(store, clock=clock, fetch=Fetch(clock, script=captcha_script), processor=processor,
+    result = run(store, clock=clock, fetch=Fetch(clock, script=captcha_script),
                  solve=Solver(report, clock, ["unsolved"]), report=report)
 
     assert (result.status, result.exit_code) == ("failed", 18)
-    assert processor.ids == [] and len(result.videos) == 1
+    assert len(result.videos) == 1
     assert report.captchas[0]["outcome"] == "unsolved"
     assert json.loads(ts.console_result_line(result, report)[len("CONSOLE_RESULT "):])["captchas"][0]["outcome"] == "unsolved"
 
@@ -505,96 +522,6 @@ def test_solver_budget_is_per_run(tmp_path):
     assert first == pytest.approx(clock.t - 700 + ts.SOLVER_BUDGET_S)
     # second call: only 240 - 200 = 40 s of solver budget left for the run
     assert second == pytest.approx(clock.t - 300 + 40)
-
-
-# --- run_processor --------------------------------------------------------------------------------------------------
-
-
-class Runner:
-    def __init__(self, *outcomes):
-        self.outcomes = list(outcomes)
-        self.calls = []
-
-    def __call__(self, argv, **kwargs):
-        self.calls.append((argv, kwargs))
-        outcome = self.outcomes.pop(0)
-        if isinstance(outcome, Exception):
-            raise outcome
-        rc, stdout, stderr = outcome
-        return subprocess.CompletedProcess(argv, rc, stdout, stderr)
-
-
-PROCESSED = json.dumps({"ok": True, "stage": "processed", "review": {"author": "SENTINEL_DM"}, "bodyTail": "SENTINEL_TEXT"}, indent=2)
-
-
-def test_run_processor_is_called_like_the_cron():
-    runner = Runner((0, PROCESSED, ""))
-
-    item = ts.run_processor(42, python="/opt/hermes/.venv/bin/python3", runner=runner)
-
-    assert item == {"id": 42, "rc": 0, "stage": "processed", "ok": True}
-    argv, kwargs = runner.calls[0]
-    assert argv == ["/opt/hermes/.venv/bin/python3", str(ts.PROCESSOR), "42"]
-    assert kwargs["cwd"] == str(ts.PROJECT_DIR)
-    assert kwargs["timeout"] == 600
-    assert kwargs["capture_output"] is True and kwargs["text"] is True
-    assert "start_new_session" not in kwargs
-
-
-def test_run_processor_reduces_stderr_to_its_code():
-    trace = "Traceback (most recent call last):\n  SENTINEL_TRACE\ncampaign_title_unknown:systeme\n"
-    item = ts.run_processor(96, python="/usr/bin/python3", runner=Runner((1, "", trace)))
-    assert item == {"id": 96, "rc": 1, "stage": "campaign_title_unknown", "ok": False}
-    assert "systeme" not in json.dumps(item)
-
-
-@pytest.mark.parametrize(
-    ("outcome", "stage", "ok"),
-    [
-        ((0, json.dumps({"ok": False, "stage": "guards_failed"}), ""), "guards_failed", False),
-        ((0, json.dumps({"ok": True, "stage": "weird_new_stage"}), ""), "unknown", True),
-        ((0, "not json SENTINEL_DM", ""), "processor_bad_json", False),
-        ((1, "", "Traceback\nKeyError: SENTINEL_TRACE\n"), "processor_error", False),
-        ((1, "", "something_else:SENTINEL_TRACE\n"), "processor_error", False),
-        (subprocess.TimeoutExpired(["x"], 600), "processor_timeout", False),
-        (OSError("SENTINEL_TRACE"), "processor_error", False),
-    ],
-)
-def test_run_processor_stages_are_closed(outcome, stage, ok):
-    item = ts.run_processor(7, python="/usr/bin/python3", runner=Runner(outcome))
-    assert item["stage"] == stage and item["ok"] is ok
-    assert "SENTINEL" not in json.dumps(item)
-
-
-def test_run_processor_missing_file_or_python_runs_nothing(monkeypatch, tmp_path):
-    runner = Runner()
-    assert ts.run_processor(1, python=None, runner=runner)["stage"] == "processor_missing"
-    monkeypatch.setattr(ts, "PROCESSOR", tmp_path / "absent.py")
-    assert ts.run_processor(1, python="/usr/bin/python3", runner=runner) == {
-        "id": 1, "rc": None, "stage": "processor_missing", "ok": False,
-    }
-    assert runner.calls == []
-
-
-def test_processor_timeout_then_next_item_is_processed(tmp_path):
-    store = make_store(tmp_path, videos=1, items=3)
-    runner = Runner(subprocess.TimeoutExpired(["x"], 600), (0, PROCESSED, ""), (0, PROCESSED, ""))
-
-    def process_one(review_id):
-        return ts.run_processor(review_id, python="/usr/bin/python3", runner=runner)
-
-    result = run(store, processor=process_one)
-
-    assert [i["stage"] for i in result.items] == ["processor_timeout", "processed", "processed"]
-    assert result.counters["items_ok"] == 2 and result.counters["items_failed"] == 1
-    assert "item %d: rc=- stage=processor_timeout ok=0" % result.items[0]["id"] in ts.emit_lines(result)
-
-
-def test_processor_sha256_constant_matches_the_pinned_value():
-    from test_processor_versioned import PROCESSOR_SHA256
-
-    assert ts.PROCESSOR_SHA256 == PROCESSOR_SHA256
-    assert ts.PROCESSOR == Path(__file__).resolve().parents[1] / "scripts" / "process_tiktok_review_one.py"
 
 
 # --- legacy cron guards ---------------------------------------------------------------------------------------------
@@ -654,17 +581,15 @@ def imminent(path, bound, running=lambda: False):
 def test_legacy_cron_imminent_bounds(tmp_path):
     # review n°1 m1: a video's worst case is ~382 s (240 s deadline + one try in flight + list_tabs 10 s + PRESENT_JS
     # probe 30 s + delete_tab 10 s) + the run's 240 s of solver (+ one try's overrun): bound = 240 + 240 + 220 = 700 s.
+    # s24 : épingle amendée (processeur retiré du scan, console ADR 055) — LEGACY_ITEM_BOUND_S is gone.
     assert ts.LEGACY_VIDEO_BOUND_S == ts.VIDEO_DEADLINE_S + ts.SOLVER_BUDGET_S + 220 == 700
-    assert ts.LEGACY_ITEM_BOUND_S == 660
+    assert not hasattr(ts, "LEGACY_ITEM_BOUND_S")
     jobs = write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 730))
     assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is False
-    assert imminent(jobs, ts.LEGACY_ITEM_BOUND_S) is False
     write_jobs(jobs, next_run_at=iso(NOW + 680))
     assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is True
-    assert imminent(jobs, ts.LEGACY_ITEM_BOUND_S) is False
     write_jobs(jobs, next_run_at=iso(NOW + 630))
     assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is True
-    assert imminent(jobs, ts.LEGACY_ITEM_BOUND_S) is True
     write_jobs(jobs, next_run_at=iso(NOW + 100))
     assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is True
     write_jobs(jobs, next_run_at=iso(NOW - 30))
@@ -722,18 +647,13 @@ def test_output_never_carries_private_data(tmp_path):
          "diagnostics": {"title": "SENTINEL_TEXT"}},
         {"ok": False, "error": "camofox_fetch_failed", "detail": "SENTINEL_DETAIL", "comments": []},
     ])
-    runner = Runner((0, PROCESSED, "SENTINEL_TRACE"), (1, "SENTINEL_DM", "Traceback\nSENTINEL_TRACE\n"))
-
-    def process_one(review_id):
-        return ts.run_processor(review_id, python="/usr/bin/python3", runner=runner)
-
-    result = run(store, clock=clock, fetch=fetch, processor=process_one)
+    result = run(store, clock=clock, fetch=fetch)
     text = output_of(result)
 
     for sentinel in SENTINELS:
         assert sentinel not in text
-    assert "video 7000: extracted=1 new=1 reviews=1 error=-" in text
-    assert "video 7001: extracted=0 new=0 reviews=0 error=camofox_fetch_failed" in text
+    assert "video 7000: extracted=1 new=1 reviews=1 error=- baseline=1" in text
+    assert "video 7001: extracted=0 new=0 reviews=0 error=camofox_fetch_failed baseline=0" in text
     assert text.splitlines()[-1].startswith("CONSOLE_RESULT ")
 
 
@@ -760,15 +680,6 @@ class MainClient:
         return False  # the real solver ends `unavailable` before any paid call
 
 
-class NoRunner:
-    def __init__(self):
-        self.calls = []
-
-    def __call__(self, argv, **kwargs):
-        self.calls.append(argv)
-        raise AssertionError("the processor must not run here")
-
-
 @pytest.fixture
 def main_env(tmp_path, monkeypatch):
     store = make_store(tmp_path, videos=2, items=2)
@@ -779,8 +690,6 @@ def main_env(tmp_path, monkeypatch):
     jobs = tmp_path / "jobs.json"
     jobs.write_text(json.dumps({"jobs": []}), encoding="utf-8")
     monkeypatch.setattr(ts, "LEGACY_JOBS_JSON", str(jobs))
-    runner = NoRunner()
-    monkeypatch.setattr(ts, "_runner", runner)
     monkeypatch.setattr(ts, "_sleep", lambda s: None)
     calls = []
 
@@ -789,7 +698,7 @@ def main_env(tmp_path, monkeypatch):
         return ok_fetch()
 
     monkeypatch.setattr(ts, "fetch_comments_from_camofox", fetch)
-    return {"store": store, "client": client, "runner": runner, "fetch_calls": calls, "monkeypatch": monkeypatch}
+    return {"store": store, "client": client, "fetch_calls": calls, "monkeypatch": monkeypatch}
 
 
 def run_main(argv=(), environ=None, capsys=None):
@@ -811,38 +720,11 @@ def test_main_nominal_wiring_and_result(main_env, capsys):
     payload = last_result(text)
     assert payload["status"] == "ok" and payload["reason"] is None
     assert set(payload["counters"]) == set(ts.COUNTERS)
-    assert len(payload["videos"]) == 2 and len(payload["items"]) == 3  # 2 old items + 2 new reviews, limit 3
-    assert all(i["stage"] == "processor_missing" for i in payload["items"])  # no SCAN_PROCESSOR_PYTHON
-    assert main_env["runner"].calls == []
+    assert len(payload["videos"]) == 2 and "items" not in payload
     call = main_env["fetch_calls"][0]
     assert call["client"] is main_env["client"]
     assert call["session_key"] == ts.SESSION_KEY and call["close_tab"] is True
     assert KEY not in text + "".join(capsys.readouterr())
-
-
-@pytest.mark.parametrize("python", [None, "python3", "bin/python3"])
-def test_main_non_absolute_interpreter_runs_no_processor(main_env, python):
-    environ = {"SADCAPTCHA_API_KEY": KEY}
-    if python is not None:
-        environ["SCAN_PROCESSOR_PYTHON"] = python
-    code, text = run_main(environ=environ)
-    assert code == 0
-    assert {i["stage"] for i in last_result(text)["items"]} == {"processor_missing"}
-    assert main_env["runner"].calls == []
-
-
-def test_main_absolute_interpreter_is_used(main_env):
-    seen = []
-
-    def runner(argv, **kwargs):
-        seen.append(argv)
-        return subprocess.CompletedProcess(argv, 0, json.dumps({"ok": False, "stage": "guards_failed"}), "")
-
-    main_env["monkeypatch"].setattr(ts, "_runner", runner)
-    code, text = run_main(environ={"SCAN_PROCESSOR_PYTHON": "/opt/hermes/.venv/bin/python3"})
-    assert code == 0
-    assert [argv[0] for argv in seen] == ["/opt/hermes/.venv/bin/python3"] * 3
-    assert {i["stage"] for i in last_result(text)["items"]} == {"guards_failed"}
 
 
 def test_main_list_tabs_error_is_a_camofox_unreachable_video(main_env):
@@ -898,45 +780,30 @@ def test_main_internal_error_is_exit_19_class_only(main_env, capsys):
     assert KEY not in text + "".join(capsys.readouterr())
 
 
-def test_main_check_only_reads_without_fetch_nor_processor(main_env, capsys):
-    code, text = run_main(["--check-only"], environ={"SCAN_PROCESSOR_PYTHON": "/usr/bin/python3", "SADCAPTCHA_API_KEY": KEY})
+def test_main_check_only_reads_without_fetch(main_env, capsys):
+    code, text = run_main(["--check-only"], environ={"SADCAPTCHA_API_KEY": KEY})
     assert code == 0
     lines = text.strip().splitlines()
-    assert lines[-2] == (
-        "tiktok-scan: check targets=2 pending=2 legacy_running=0 legacy_due=0"
-        " processor_sha256=ok processor_python=/usr/bin/python3"
-    )
+    assert lines[-2] == "tiktok-scan: check targets=2 pending=2 legacy_running=0 legacy_due=0"
     assert last_result(text) == {"status": "skipped", "reason": "check_only", "counters": {}}
-    assert main_env["fetch_calls"] == [] and main_env["runner"].calls == []
+    assert main_env["fetch_calls"] == []
     assert KEY not in text + "".join(capsys.readouterr())
 
 
-def test_main_check_only_reports_missing_processor_python_and_due_cron(main_env, tmp_path):
-    main_env["monkeypatch"].setattr(ts, "PROCESSOR", tmp_path / "elsewhere.py")
+def test_main_check_only_reports_a_due_cron(main_env, tmp_path):
     main_env["monkeypatch"].setattr(ts, "LEGACY_JOBS_JSON", str(tmp_path / "absent.json"))
-    code, text = run_main(["--check-only"], environ={"SCAN_PROCESSOR_PYTHON": "python3"})
+    code, text = run_main(["--check-only"], environ={})
     assert code == 0
-    assert text.strip().splitlines()[-2] == (
-        "tiktok-scan: check targets=2 pending=2 legacy_running=0 legacy_due=1"
-        " processor_sha256=missing processor_python=missing"
-    )
+    assert text.strip().splitlines()[-2] == "tiktok-scan: check targets=2 pending=2 legacy_running=0 legacy_due=1"
 
 
 def test_main_check_only_legacy_due_uses_the_video_bound(main_env, tmp_path):
     # review n°1 m1: 650 s before the cron is inside the 700 s video bound
     main_env["monkeypatch"].setattr(ts, "_clock", lambda: NOW)
     write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 650))
-    code, text = run_main(["--check-only"], environ={"SCAN_PROCESSOR_PYTHON": "/usr/bin/python3"})
-    assert code == 0
-    assert " legacy_due=1 " in text.strip().splitlines()[-2]
-    write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 730))
-    code, text = run_main(["--check-only"], environ={"SCAN_PROCESSOR_PYTHON": "/usr/bin/python3"})
-    assert " legacy_due=0 " in text.strip().splitlines()[-2]
-
-
-def test_main_check_only_reports_a_mismatching_processor(main_env, tmp_path):
-    other = tmp_path / "other.py"
-    other.write_text("print('x')\n", encoding="utf-8")
-    main_env["monkeypatch"].setattr(ts, "PROCESSOR", other)
     code, text = run_main(["--check-only"], environ={})
-    assert "processor_sha256=mismatch" in text
+    assert code == 0
+    assert text.strip().splitlines()[-2].endswith(" legacy_due=1")
+    write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 730))
+    code, text = run_main(["--check-only"], environ={})
+    assert text.strip().splitlines()[-2].endswith(" legacy_due=0")

@@ -169,3 +169,79 @@ def test_disabled_console_campaign_stops_triggering(tmp_path):
     assert result["created_reviews"] == 0
     with sqlite3.connect(db) as connection:
         assert connection.execute("SELECT COUNT(*) FROM tiktok_review_items").fetchone() == (0,)
+
+
+# --- s24 (console ADR 055, D1): the kanban sync stores the DM text of TikTok campaigns -----------------------------
+
+
+def _card(keywords, dm=None, url=None):
+    lines = ["Statut métier: Actif", "Plateforme: any", f"Mots-clés: {keywords}"]
+    if dm is not None:
+        lines.append(f"Message DM: {dm}")
+    if url is not None:
+        lines.append(f"URL ressource: {url}")
+    return "\n".join(lines) + "\n"
+
+
+def _dm_texts(db):
+    with sqlite3.connect(db) as connection:
+        return dict(connection.execute("SELECT slug, dm_text FROM tiktok_campaigns ORDER BY slug").fetchall())
+
+
+def test_s24_colliding_slugs_keep_each_their_dm_text(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    kanban = tmp_path / "kanban.db"
+    _kanban_with(kanban, [("t1", "Proxy A", _card("proxy", "DM A")), ("t2", "Proxy B", _card("proxy, other", "DM B"))])
+    sync_meta_campaigns_to_tiktok_report(TikTokBackofficeStore(db), kanban)
+    assert _dm_texts(db) == {"proxy": "DM A", "proxy-t2": "DM B"}
+
+
+def test_s24_multiline_dm_is_stored_with_its_newlines(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    kanban = tmp_path / "kanban.db"
+    body = "Statut métier: Actif\nMots-clés: proxy\nMessage DM: Salut !\nVoici le lien : http://ex.am/ple\nURL ressource: http://ex.am/ple\n"
+    _kanban_with(kanban, [("t1", "Proxy", body)])
+    sync_meta_campaigns_to_tiktok_report(TikTokBackofficeStore(db), kanban)
+    assert _dm_texts(db) == {"proxy": "Salut !\nVoici le lien : http://ex.am/ple"}
+
+
+def test_s24_card_with_only_a_resource_url_has_no_dm_text(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    kanban = tmp_path / "kanban.db"
+    _kanban_with(kanban, [("t1", "Proxy", _card("proxy", url="http://ex.am/ple"))])
+    sync_meta_campaigns_to_tiktok_report(TikTokBackofficeStore(db), kanban)
+    assert _dm_texts(db) == {"proxy": None}
+
+
+def test_s24_console_campaign_dm_text_is_never_overwritten(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    kanban = tmp_path / "kanban.db"
+    store = TikTokBackofficeStore(db)
+    write_console_campaign(db, slug="voicebox", keywords=("voicebox",))
+    _kanban_with(kanban, [("t1", "Voicebox", _card("voicebox", "DM kanban"))])
+    report = sync_meta_campaigns_to_tiktok_report(store, kanban)
+    assert report.skipped_console == 1
+    assert _dm_texts(db)["voicebox"] == "Le lien"
+
+
+def test_s24_resync_is_idempotent_and_follows_the_card(tmp_path):
+    db = tmp_path / "tiktok.sqlite3"
+    kanban = tmp_path / "kanban.db"
+    store = TikTokBackofficeStore(db)
+    _kanban_with(kanban, [("t1", "Proxy", _card("proxy", "DM 1"))])
+    sync_meta_campaigns_to_tiktok_report(store, kanban)
+    sync_meta_campaigns_to_tiktok_report(store, kanban)
+    assert _dm_texts(db) == {"proxy": "DM 1"}
+    with sqlite3.connect(kanban) as connection:
+        connection.execute("UPDATE tasks SET body = ? WHERE id = 't1'", (_card("proxy", "DM 2"),))
+    sync_meta_campaigns_to_tiktok_report(store, kanban)
+    assert _dm_texts(db) == {"proxy": "DM 2"}
+    with sqlite3.connect(kanban) as connection:
+        connection.execute("UPDATE tasks SET body = ? WHERE id = 't1'", (_card("proxy", url="http://x"),))
+    sync_meta_campaigns_to_tiktok_report(store, kanban)
+    assert _dm_texts(db) == {"proxy": None}
+
+
+def test_s24_parsed_campaign_carries_dm_text():
+    campaign = parse_meta_campaign_card("t1", "Proxy", _card("proxy", "  DM  "))
+    assert campaign.dm_text == "DM"

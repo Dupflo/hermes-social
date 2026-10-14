@@ -1,0 +1,47 @@
+{
+  "description": "The owner answered ANOTHER comment, not the target.",
+  "owner": "@SENTINEL_OWNER",
+  "target": {
+    "author": "@fan_two",
+    "text": "graphify aussi"
+  },
+  "snapshot": {
+    "login_gate": false,
+    "panel_open": true,
+    "comment_icon": null,
+    "comments": [
+      {
+        "author": "@fan_one",
+        "text": "graphify stp",
+        "reply_button": {
+          "selector": "html > body > div:nth-of-type(1) > p:nth-of-type(12)",
+          "x": 1200,
+          "y": 400
+        },
+        "view_replies": [],
+        "replies": [
+          {
+            "author": "@SENTINEL_OWNER",
+            "text": "Je viens de t’envoyer le lien en message privé"
+          }
+        ]
+      },
+      {
+        "author": "@fan_two",
+        "text": "graphify aussi",
+        "reply_button": {
+          "selector": "html > body > div:nth-of-type(1) > p:nth-of-type(14)",
+          "x": 1200,
+          "y": 400
+        },
+        "view_replies": [],
+        "replies": []
+      }
+    ]
+  },
+  "expected": {
+    "target_found": true,
+    "owner_reply_present": false,
+    "reply_verified": false
+  }
+}

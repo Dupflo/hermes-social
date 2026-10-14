@@ -29,6 +29,10 @@ def test_console_campaign_video_is_scanned_on_a_copy_of_the_base(tmp_path):
 
     copy = tmp_path / "copy.sqlite3"
     shutil.copy2(original, copy)
+    # s24 : épingle amendée (processeur retiré du scan, console ADR 055) — the console video was already read once
+    # by the console (its baseline is set), so this read creates a pending item, not a first-scan baseline (P7).
+    with sqlite3.connect(copy) as connection:
+        connection.execute("UPDATE tiktok_videos SET baseline_at = '2000-01-01 00:00:00' WHERE video_url = ?", (CONSOLE_VIDEO,))
 
     def fetch(*, video_url, on_captcha, expired, sleep=None):
         if video_url == CONSOLE_VIDEO:
@@ -39,7 +43,6 @@ def test_console_campaign_video_is_scanned_on_a_copy_of_the_base(tmp_path):
         store=TikTokBackofficeStore(copy),
         fetch=fetch,
         tabs_count=lambda: 1,
-        process_one=lambda review_id: {"id": review_id, "rc": 0, "stage": "processed", "ok": True},
         legacy_running=lambda: False,
         legacy_imminent=lambda bound: False,
         solve=lambda tab_id, *, deadline: "unsolved",

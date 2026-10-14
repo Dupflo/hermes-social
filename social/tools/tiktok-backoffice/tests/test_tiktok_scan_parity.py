@@ -5,9 +5,13 @@ Oracle: scripts/tiktok_cron_auto_dm.py of the repo, loaded by importlib (pattern
 work on their own copy of the same fixture base, and are compared on LOGICAL steps:
 ("counts",) ("sync",) ("poll", 8) ("scan", url) ("pending", 3) ("process", id).
 
-Nominal sequence: a single named exception, `sync-kanban-campaigns`, which belongs to the job `campaign-sync`
-(console ADR 040). Every deliberate divergence of the job is a row of DOCUMENTED_DEVIATIONS, tested oracle against
-job, and listed under the same id in console ADR 054 § Écarts. Nothing here runs the versioned processor.
+Nominal sequence: two named exceptions, `sync-kanban-campaigns`, which belongs to the job `campaign-sync`
+(console ADR 040), and `queue_moved_to_tiktok_reply` (s24: the queue steps ("pending", 3) and ("process", id) belong
+to the job `tiktok-reply`, console ADR 055). Every deliberate divergence of the job is a row of
+DOCUMENTED_DEVIATIONS, tested oracle against job, and listed under the same id in console ADR 054/055 § Écarts.
+Nothing here runs the versioned processor.
+
+s24 : épingle amendée (processeur retiré du scan, console ADR 055).
 """
 
 import importlib.util
@@ -26,7 +30,12 @@ from app.store import TikTokBackofficeStore
 
 CRON = Path(__file__).resolve().parents[1] / "scripts" / "tiktok_cron_auto_dm.py"
 NAMED_EXCEPTION = "sync-kanban-campaigns"
+NAMED_EXCEPTIONS = (NAMED_EXCEPTION, "queue_moved_to_tiktok_reply")
 SYNC = ("sync",)
+
+
+def queue_step(step):
+    return step[0] in ("pending", "process")
 
 
 def video(i):
@@ -158,9 +167,8 @@ class TracingStore:
         self.trace.append(("poll", limit))
         return self.store.poll_targets(limit)
 
-    def pending_review_items(self, limit):
-        self.trace.append(("pending", limit))
-        return self.store.pending_review_items(limit)
+    def needs_baseline(self, url):
+        return self.store.needs_baseline(url)
 
     def ingest_comments(self, **kwargs):
         return self.store.ingest_comments(**kwargs)
@@ -178,7 +186,7 @@ class Clock:
 
 
 def run_job(db, *, page=nominal, captcha_on=None, tabs=None, legacy_running=False, legacy_due=False,
-            fetch_seconds=0.0, item_seconds=0.0):
+            fetch_seconds=0.0):
     trace = []
     clock = Clock()
     report = CaptchaReport()
@@ -195,16 +203,10 @@ def run_job(db, *, page=nominal, captcha_on=None, tabs=None, legacy_running=Fals
         report.captchas.append({"seq": len(report.captchas) + 1, "outcome": "unsolved", "at": 0, "attempts": []})
         return "unsolved"
 
-    def process_one(review_id):
-        trace.append(("process", review_id))
-        clock.t += item_seconds
-        return {"id": review_id, "rc": 0, "stage": "processed", "ok": True}
-
     result = ts.run_scan(
         store=TracingStore(db, trace),
         fetch=fetch,
         tabs_count=lambda: next(tab_counts, 1),
-        process_one=process_one,
         legacy_running=lambda: legacy_running,
         legacy_imminent=lambda bound: legacy_due,
         solve=solve,
@@ -218,7 +220,7 @@ def run_job(db, *, page=nominal, captcha_on=None, tabs=None, legacy_running=Fals
 # --- nominal sequence -------------------------------------------------------------------------------------------------
 
 
-def test_nominal_sequence_matches_the_cron_except_the_named_sync(tmp_path, monkeypatch):
+def test_nominal_sequence_matches_the_cron_except_the_named_exceptions(tmp_path, monkeypatch):
     a, b = build_fixture(tmp_path)
 
     oracle = run_oracle(a, tmp_path, monkeypatch)
@@ -226,10 +228,11 @@ def test_nominal_sequence_matches_the_cron_except_the_named_sync(tmp_path, monke
 
     assert oracle.count(SYNC) == 1, f"the oracle runs {NAMED_EXCEPTION} exactly once"
     assert SYNC not in job, f"{NAMED_EXCEPTION} belongs to campaign-sync (console ADR 040), never to tiktok-scan"
-    assert job == [step for step in oracle if step != SYNC]
+    # queue_moved_to_tiktok_reply: the oracle works the queue, the job never does (console ADR 055)
+    assert ("pending", 3) in oracle and [s for s in oracle if s[0] == "process"] == [("process", 1), ("process", 2), ("process", 3)]
+    assert not any(queue_step(s) for s in job)
+    assert job == [step for step in oracle if step != SYNC and not queue_step(step)]
     assert result.status == "ok" and result.exit_code == 0
-    # same steps on the same data: the processed ids are the 3 oldest pending items on both sides
-    assert [s for s in job if s[0] == "process"] == [("process", 1), ("process", 2), ("process", 3)]
 
 
 # --- documented deviations (console ADR 054 § Écarts) ------------------------------------------------------------------
@@ -252,9 +255,13 @@ DOCUMENTED_DEVIATIONS = [
     {"id": "no_session", "scenario": "last verdict is not connected", "side": "console",
      "oracle": "(runs)", "job": "no exec (console side: worker/executors/hermes-exec.test.ts, C2)",
      "ref": "ADR 054 § Écarts"},
-    # console ADR 054 § Écarts : budget
-    {"id": "budget", "scenario": "clock beyond SCAN_BUDGET_S / window < 720 s",
-     "oracle": "processes everything", "job": "videos or items skipped", "ref": "ADR 054 § Écarts"},
+    # console ADR 055 § Écarts : budget
+    {"id": "budget", "scenario": "clock beyond SCAN_BUDGET_S",
+     "oracle": "scans everything", "job": "videos skipped", "ref": "ADR 055 § Écarts"},
+    # console ADR 055 § Écarts : first_scan_baseline
+    {"id": "first_scan_baseline", "scenario": "first successful read of a never-read video",
+     "oracle": "review items created pending_review", "job": "review items created expired / first_scan_baseline",
+     "ref": "ADR 055 § Écarts"},
 ]
 
 
@@ -311,20 +318,37 @@ def test_documented_deviation(row, tmp_path, monkeypatch):
         job, result = run_job(b, fetch_seconds=ts.SCAN_BUDGET_S + 1)
         assert [s for s in job if s[0] == "scan"] == [("scan", video(2))]
         assert result.counters["videos_skipped"] == 2
-        c = tmp_path / "c.sqlite3"
-        shutil.copy2(tmp_path / "fixture.sqlite3", c)
-        job, result = run_job(c, fetch_seconds=2000)  # 2 videos (2nd starts at 2000 s), then 500 s < 720 s left
-        assert [s[0] for s in job].count("scan") == 2
-        assert not any(s[0] == "process" for s in job) and result.counters["queue_skipped"] == 3
+
+    elif row["id"] == "first_scan_baseline":
+        run_oracle(a, tmp_path, monkeypatch)
+        job, result = run_job(b)
+
+        def created(db, url):
+            with sqlite3.connect(db) as connection:
+                return connection.execute(
+                    """SELECT ri.status, ri.failure_reason FROM tiktok_review_items ri
+                       JOIN tiktok_comments c ON c.comment_id = ri.comment_id
+                       WHERE c.video_url = ? AND ri.comment_id NOT LIKE 'old%'""",
+                    (url,),
+                ).fetchall()
+
+        # video(2) and video(1) were never read: a baseline for the job only
+        for i in (1, 2):
+            assert created(a, video(i)) == [("pending_review", None)]
+            assert created(b, video(i)) == [("expired", "first_scan_baseline")]
+        # video(0) already had comments (legacy reads): same item on both sides
+        assert created(a, video(0)) == created(b, video(0)) == [("pending_review", None)]
+        assert result.counters["reviews_baseline"] == 2
 
     else:  # pragma: no cover - a new row needs its own branch
         raise AssertionError(f"untested deviation {row['id']}")
 
 
-def test_deviation_ids_are_the_six_of_adr_054():
+def test_deviation_ids_are_those_of_adr_054_and_055():
     assert [row["id"] for row in DOCUMENTED_DEVIATIONS] == [
-        "captcha_unsolved", "session_lost", "tabs_full", "legacy_guard", "no_session", "budget",
+        "captcha_unsolved", "session_lost", "tabs_full", "legacy_guard", "no_session", "budget", "first_scan_baseline",
     ]
+    assert NAMED_EXCEPTIONS == ("sync-kanban-campaigns", "queue_moved_to_tiktok_reply")
 
 
 # --- AC 3 end to end: a new video is attempted within the next 2 runs, failures included -----------------------------

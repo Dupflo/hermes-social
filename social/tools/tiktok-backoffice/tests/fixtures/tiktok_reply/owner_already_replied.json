@@ -1,0 +1,52 @@
+{
+  "description": "Synthetic comments snapshot (shape of COMMENTS_JS): the owner already answered the target, with a text that announces nothing; another comment is answered by a third party.",
+  "owner": "@SENTINEL_OWNER",
+  "target": {
+    "author": "@fan_one",
+    "text": "graphify stp"
+  },
+  "snapshot": {
+    "login_gate": false,
+    "panel_open": true,
+    "comment_icon": null,
+    "comments": [
+      {
+        "author": "@fan_one",
+        "text": "graphify stp",
+        "reply_button": {
+          "selector": "html > body > div:nth-of-type(1) > p:nth-of-type(12)",
+          "x": 1200,
+          "y": 400
+        },
+        "view_replies": [],
+        "replies": [
+          {
+            "author": "@sentinel_owner",
+            "text": "merci !"
+          }
+        ]
+      },
+      {
+        "author": "@fan_two",
+        "text": "graphify aussi",
+        "reply_button": {
+          "selector": "html > body > div:nth-of-type(1) > p:nth-of-type(14)",
+          "x": 1200,
+          "y": 400
+        },
+        "view_replies": [],
+        "replies": [
+          {
+            "author": "@someone_else",
+            "text": "moi aussi"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "target_found": true,
+    "owner_reply_present": true,
+    "reply_verified": false
+  }
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import re
 import sqlite3
 import unicodedata
@@ -68,8 +69,8 @@ def parse_meta_campaign_card(task_id: str, title: str, body: str | None) -> Camp
     keywords = [keyword.strip().lower() for keyword in fields.get("keywords", "").split(",") if keyword.strip()]
     if not keywords:
         return None
-    # Only import resource-delivery campaigns. The actual private resource text/link
-    # remains in Meta storage; TikTok gets only the approved public confirmation text.
+    # Only import resource-delivery campaigns. Le texte du DM est désormais stocké pour TikTok, s24
+    # (console ADR 055, D1): `tiktok-reply` reads `tiktok_campaigns.dm_text`, nothing else.
     if not (fields.get("dm_text", "").strip() or fields.get("resource_url", "").strip()):
         return None
     return Campaign(
@@ -78,6 +79,7 @@ def parse_meta_campaign_card(task_id: str, title: str, body: str | None) -> Camp
         keywords=tuple(keywords),
         reply_template=DEFAULT_TIKTOK_PUBLIC_REPLY,
         active=True,
+        dm_text=fields.get("dm_text", "").strip() or None,
     )
 
 
@@ -101,13 +103,8 @@ def load_meta_campaigns(kanban_db: str | Path = DEFAULT_KANBAN_DB) -> list[Campa
         # Keep slug stable but avoid collisions if two campaigns share first keyword.
         if slug in seen:
             slug = f"{slug}-{task_id}"
-            campaign = Campaign(
-                slug=slug,
-                name=campaign.name,
-                keywords=campaign.keywords,
-                reply_template=campaign.reply_template,
-                active=campaign.active,
-            )
+            # s24 (S2): replace() keeps every field, dm_text included.
+            campaign = dataclasses.replace(campaign, slug=slug)
         seen.add(slug)
         campaigns.append(campaign)
     return campaigns

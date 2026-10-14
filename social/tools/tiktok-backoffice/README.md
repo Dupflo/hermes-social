@@ -26,13 +26,18 @@ Browser-based TikTok comment automation using Camofox.
 | `app/captcha_selectors.py` | The only module that knows the captcha DOM (8 variants, passive page scripts) |
 | `app/captcha_geometry.py` | Pure identification and SadCaptcha answer → mouse gesture conversion |
 | `app/sadcaptcha.py` | SadCaptcha HTTP client (stdlib, key never printed) |
-| `scripts/tiktok_cron_auto_dm.py` | Main cron worker (scan + DM) |
+| `app/tiktok_scan.py` | Comment scan of the hermes-console job `tiktok-scan` (s23; no queue since s24) |
+| `app/tiktok_reply.py` | Replies and DMs of the hermes-console job `tiktok-reply` (`python -m app.tiktok_reply`, s24) |
+| `app/tiktok_reply_page.py` | Browser gestures and page verifications of `tiktok-reply` (keystrokes, clicks, no clipboard) |
+| `app/tiktok_reply_selectors.py` | The only module that knows the comments panel, profile and DM thread DOM (read-only scripts) |
+| `scripts/console-tiktok-reply.sh` | Wrapper of `tiktok-reply`, run by the console worker (arguments forwarded) |
+| `scripts/tiktok_cron_auto_dm.py` | Main cron worker (scan + DM), legacy, kept until the s24 cutover |
 | `tests/` | Pytest test suite |
 
 ## Requirements
 
 - Camofox container running (`hermes-social-camofox-1`)
-- `xclip` and `xdotool` installed in the Camofox container
+- `xclip` and `xdotool` installed in the Camofox container (legacy processor only; `tiktok-reply` needs neither)
 - A Kanban database (`/opt/data/kanban/boards/meta-campaigns/kanban.db`)
 - Campaign source tasks with DM text stored in Kanban
 
@@ -157,53 +162,97 @@ The captcha selectors (official client of 2026-09-25) could not be checked again
 
 ## Scan console (s23)
 
-The hermes-console job `tiktok-scan` (every 15 min, console ADR 054) runs `scripts/console-tiktok-scan.sh` →
-`python -m app.tiktok_scan` in the console venv, inside the `tiktok-browser` lock group. It replaces the Hermes cron
-`bf85146a1ae8` (`scripts/tiktok_cron_auto_dm.py --apply`), minus `sync-kanban-campaigns` (job `campaign-sync`).
+The hermes-console job `tiktok-scan` (every 15 min, console ADR 054, amended by console ADR 055 in s24) runs
+`scripts/console-tiktok-scan.sh` → `python -m app.tiktok_scan` in the console venv, inside the `tiktok-browser` lock
+group. It replaces the scan loop of the Hermes cron `bf85146a1ae8` (`scripts/tiktok_cron_auto_dm.py --apply`), minus
+`sync-kanban-campaigns` (job `campaign-sync`) and, since s24, minus the queue (job `tiktok-reply`, below).
 
 - **Session guard (console side)**: the job never starts unless the last `tiktok-session-check` verdict is
   `connected` and that check is enabled ⇒ otherwise `skipped`/`no_session`, no exec.
 - **Legacy cron guards** (never both at once): a process naming `tiktok_cron_auto_dm` in `/proc` at start ⇒
   `skipped`/`legacy_cron_running`; before each video (bound 700 s: worst case ~382 s + 240 s of solver + one
-  try's overrun) and each queue item (bound 660 s) the module reads `/opt/data/cron/jobs.json` **read only**
-  (`enabled`, `state`, `next_run_at` of `bf85146a1ae8`, nothing printed) and stops when the cron may start within the
-  bound ⇒ `skipped`/`legacy_cron_due`. Unreadable file ⇒ due.
+  try's overrun) the module reads `/opt/data/cron/jobs.json` **read only** (`enabled`, `state`, `next_run_at` of
+  `bf85146a1ae8`, nothing printed) and stops when the cron may start within the bound ⇒ `skipped`/`legacy_cron_due`.
+  Unreadable file ⇒ due.
 - **Scan**: `poll_targets(8)`, least recently attempted first; every attempt (read, empty, failed) dates
   `last_scanned_at` (`store.mark_scan_attempt`), so failures no longer hog the head. Fetch in process, own tab
   (closed after), at most 9 Camofox tabs, 240 s per video; a captcha goes to the s22 solver in the current tab,
   never after a reload (solver time suspended from the video deadline, 240 s and 3 captchas per run; a further
-  captcha is refused without a solver call and logged `unavailable`).
-- **Budgets**: no new video after 2160 s; a queue item only starts with ≥ 720 s left before the run budget of
-  4500 s (registry `timeoutSec` 4800). Videos not attempted are not dated: first in line next run.
-- **Queue**: the 3 oldest `pending_review` items (same query as the cron, no filter), each through the versioned
-  processor called like the cron: `python3` of the hermes container (`SCAN_PROCESSOR_PYTHON`, resolved by the wrapper
-  before `uv run`; no `python3` ⇒ the wrapper exits 19, run `failed`; absolute path only, else
-  `processor_missing`), `<repo>/scripts/process_tiktok_review_one.py <id>`, cwd = this project, 600 s. Only its
-  `stage` and `ok` are kept; its stdout/stderr (private data) never are.
+  captcha is refused without a solver call and logged `unavailable`). No new video after 2160 s. Videos not
+  attempted are not dated: first in line next run.
+- **Baseline (s24)**: comments are ingested as a console read (`ingest_comments(console_read=True)`), which dates
+  `tiktok_videos.baseline_at` in the ingestion's own transaction. The first successful console read of a video never
+  read before (no baseline, no comment) is a baseline: its review items are created `expired`/`first_scan_baseline`
+  (TikTok dates are lost at extraction, an old comment would look new). Counter `reviews_baseline`, `baseline=<0|1>`
+  per video.
 - **Outcomes**:
 
-  | Case | Queue | Run console |
-  | --- | --- | --- |
-  | session not `connected` / check disabled | — | `skipped`/`no_session` (no exec) |
-  | legacy cron running at start | no | `skipped`/`legacy_cron_running` |
-  | legacy cron due before a video or an item | skipped | `skipped`/`legacy_cron_due` |
-  | 0 target video | **yes** (cron parity) | `skipped`/`no_targets` |
-  | captcha unsolved | no | `failed`/`exit_18` |
-  | session lost (`tiktok_page_not_actionable`) | no | `failed`/`exit_20` |
-  | tabs saturated before a video | no | next rule |
-  | no attempted video read | yes unless stopped | `failed`/`exit_17` |
-  | unexpected exception | — | `failed`/`exit_19` (class name only) |
-  | otherwise | yes | `ok`, `empty` after 4 decisive runs at `comments_extracted` = 0 |
+  | Case | Run console |
+  | --- | --- |
+  | session not `connected` / check disabled | `skipped`/`no_session` (no exec) |
+  | legacy cron running at start | `skipped`/`legacy_cron_running` |
+  | legacy cron due before a video | `skipped`/`legacy_cron_due` |
+  | 0 target video | `skipped`/`no_targets` |
+  | captcha unsolved | `failed`/`exit_18` |
+  | session lost (`tiktok_page_not_actionable`) | `failed`/`exit_20` |
+  | tabs saturated before a video | next rule |
+  | no attempted video read | `failed`/`exit_17` |
+  | unexpected exception | `failed`/`exit_19` (class name only) |
+  | otherwise | `ok`, `empty` after 4 decisive runs at `comments_extracted` = 0 |
 
-  Output: `video <id>: extracted= new= reviews= error=`, `item <id>: rc= stage= ok=`, a summary line, then
-  `CONSOLE_RESULT` last (flat counters + `videos`/`items`/`captchas`), on every exit code.
-- **`--check-only`**: no browser, no processor; prints `targets`, `pending`, `legacy_running`, `legacy_due`,
-  `processor_sha256=<ok|mismatch|missing>` and `processor_python=<path|missing>`. Never run by the console.
-- The legacy cron `scripts/tiktok_cron_auto_dm.py` stays in the repo as the parity oracle until s24.
+  Output: `video <id>: extracted= new= reviews= error= baseline=`, a summary line, then `CONSOLE_RESULT` last (flat
+  counters + `videos`/`captchas`), on every exit code.
+- **`--check-only`**: no browser; prints `targets`, `pending`, `legacy_running`, `legacy_due`. Never run by the
+  console.
+- The legacy cron `scripts/tiktok_cron_auto_dm.py` stays in the repo as the parity oracle until the s24 cutover.
 - **Versioned processor**: `scripts/process_tiktok_review_one.py` is the production copy of
   `/opt/data/tmp/process_tiktok_review_one.py`, versioned as is (byte for byte, sha256
-  `08e5f29d0c87bd154588df5e603d0a5132814d3a420f03e742e39d9aa2892f93`, pinned by `tests/test_processor_versioned.py`);
-  it is replaced in s24. No test imports or runs it: it sends real TikTok messages.
+  `08e5f29d0c87bd154588df5e603d0a5132814d3a420f03e742e39d9aa2892f93`, pinned by `tests/test_processor_versioned.py`).
+  Since s24 the scan no longer calls it; only `tests/test_process_review_one.py` loads it, every side effect faked
+  (characterization). It sends real TikTok messages when run.
+
+## Réponses console (s24)
+
+The hermes-console job `tiktok-reply` (every 15 min, console ADR 055, **delivered disabled**, enabled at the s24
+cutover) runs `scripts/console-tiktok-reply.sh` → `python -m app.tiktok_reply` in the console venv, inside the
+`tiktok-browser` lock group, under `timeout 1500`. It replaces the legacy processor and the detection of the Hermes
+cron « TikTok fallback surveillance » (`42cade327881`).
+
+- **Guards**: session (console side, `no_session`); legacy cron `bf85146a1ae8` running (`/proc`) or enabled and not
+  paused in `/opt/data/cron/jobs.json` (unreadable ⇒ enabled) ⇒ `skipped`, **nothing written**; asked at start and
+  before every item.
+- **Expiration**: queue items ingested more than 7 days ago ⇒ `expired`/`older_than_7d`; items not ingested by a
+  console read after their video's baseline (legacy path) ⇒ `expired`/`legacy_backlog`. No page, no budget.
+- **Per item**: conditional claim `pending_review` → `sending` (never twice); campaign unknown / inactive / without
+  `dm_text` ⇒ `failed` (`campaign_unknown`, `campaign_inactive`, `no_dm_text`) without browser; owner reply already
+  under the comment and no own send row ⇒ `posted`/`already_present`, nothing sent; DM (text of
+  `tiktok_campaigns.dm_text`, real keystrokes, `Shift+Enter` between lines) then the public reply
+  (`tiktok_review_items.reply_text`), each **verified in the page**; every clicked send writes a
+  `tiktok_outbound_messages` row (`sent` | `failed`) at once. No « J'aime ».
+- **Hourly limit**: `TIKTOK_REPLY_MAX_PER_HOUR` (1-60, default 10, from the console registry `execEnv`), counted in
+  `tiktok_outbound_messages` over a sliding hour. Budget too low at start ⇒ `skipped`/`rate_limited`; spent during
+  the run ⇒ `ok`/`rate_limited`, the rest stays queued.
+- **Owner**: `TIKTOK_OWNER_HANDLE` (`@handle`, from the registry `execEnv`), never hard-coded.
+- **Outcomes**:
+
+  | Case | Run console |
+  | --- | --- |
+  | invalid owner, limit or `--max-items` | `failed`/`exit_25` (no store access) |
+  | legacy cron running / enabled | `skipped`/`legacy_cron_running` / `legacy_cron_enabled` |
+  | empty queue after expiration | `ok`/`no_pending` |
+  | budget too low at start | `skipped`/`rate_limited` |
+  | budget spent during the run | `ok`/`rate_limited` |
+  | Camofox unreachable, tabs full, page unusable before any action | item back to the queue, `failed`/`exit_21` |
+  | captcha unsolved before any action | item back to the queue, `failed`/`exit_22` |
+  | unexpected exception / SIGTERM | `failed`/`exit_23` (class name only; an item with a send left `sending`) |
+  | session lost before any action | item back to the queue, `failed`/`exit_24` |
+  | otherwise | `ok` |
+
+- **`--check-only`**: no browser, no write besides the schema; prints `pending`, `expirable`, `legacy_backlog`,
+  `legacy=<none|enabled|running>`, `budget`, `owner=<ok|missing>`, `captcha_key=<ok|missing>` (never the key) and
+  `dm_text_campaigns=<with>/<active>`.
+- **`--max-items N`** (1-5): CLI only (first observed send of the cutover), never passed by the console.
+- The legacy processor and `scripts/tiktok_cron_auto_dm.py` stay in the repo until the s24 cutover.
 
 ## Security
 

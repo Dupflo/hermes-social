@@ -1,7 +1,8 @@
 """s23 — the review processor, versioned byte for byte from the production copy (console ADR 054, AC 7).
 
 The file is only ever read as bytes here: no test imports it, runs it, or hands it to runpy (it sends real
-TikTok messages when run).
+TikTok messages when run) — except the characterization tests of s24, which load it by path with every side
+effect replaced by a fake (console ADR 055, D10).
 """
 
 import hashlib
@@ -12,6 +13,8 @@ PROCESSOR = Path(__file__).resolve().parents[1] / "scripts" / "process_tiktok_re
 PROCESSOR_SHA256 = "08e5f29d0c87bd154588df5e603d0a5132814d3a420f03e742e39d9aa2892f93"
 PROCESSOR_SIZE = 29_522
 NAME = "process_tiktok_review_one"
+# s24 : épingle amendée (caractérisation du processeur, console ADR 055)
+ALLOWED_IMPORTERS = {"test_process_review_one.py"}
 
 
 def test_processor_bytes_are_the_production_copy():
@@ -24,7 +27,7 @@ def test_no_test_imports_or_runs_the_processor():
     here = Path(__file__).resolve()
     offenders = []
     for path in sorted(here.parent.glob("*.py")):
-        if path == here:
+        if path == here or path.name in ALLOWED_IMPORTERS:
             continue
         text = path.read_text(encoding="utf-8")
         if re.search(rf"^\s*(import\s+{NAME}\b|from\s+{NAME}\b)", text, re.M):

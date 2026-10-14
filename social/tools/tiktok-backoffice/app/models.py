@@ -47,6 +47,7 @@ class Campaign:
     keywords: tuple[str, ...]
     reply_template: str
     active: bool = True
+    dm_text: str | None = None  # s24 (console ADR 055, D1): "Message DM" of the kanban card
 
 
 @dataclass(frozen=True)

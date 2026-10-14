@@ -1,0 +1,37 @@
+{
+  "description": "The owner's reply (typographic apostrophe, non-breaking space) is under the target after posting.",
+  "owner": "@SENTINEL_OWNER",
+  "target": {
+    "author": "@fan_one",
+    "text": "graphify stp"
+  },
+  "reply_text": "Je viens de t’envoyer le lien en message privé",
+  "snapshot": {
+    "login_gate": false,
+    "panel_open": true,
+    "comment_icon": null,
+    "comments": [
+      {
+        "author": "@fan_one",
+        "text": "graphify   stp",
+        "reply_button": {
+          "selector": "html > body > div:nth-of-type(1) > p:nth-of-type(14)",
+          "x": 1200,
+          "y": 400
+        },
+        "view_replies": [],
+        "replies": [
+          {
+            "author": "@sentinel_owner",
+            "text": "Je viens de t’envoyer le lien en message privé"
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "target_found": true,
+    "owner_reply_present": true,
+    "reply_verified": true
+  }
+}

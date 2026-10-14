@@ -1,0 +1,29 @@
+{
+  "description": "Synthetic DM thread (shape of THREAD_JS): our DM was sent before, older than the last 3 outgoing bubbles.",
+  "dm_text": "Salut !\nVoici le lien : http://ex.am/ple",
+  "thread": {
+    "login_gate": false,
+    "editor": {
+      "selector": "html > body > div:nth-of-type(3)",
+      "x": 900,
+      "y": 800,
+      "text": ""
+    },
+    "outgoing": [
+      "Salut ! Voici le lien : http://ex.am/ple",
+      "ok",
+      "merci",
+      "a plus"
+    ],
+    "send_button": {
+      "selector": "html > body > button:nth-of-type(1)",
+      "x": 1100,
+      "y": 800
+    },
+    "error": false
+  },
+  "expected": {
+    "dm_present": true,
+    "dm_verified": false
+  }
+}
