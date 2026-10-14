@@ -50,7 +50,8 @@ def test_login_gate_node_suite():
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     # s26 : épingle amendée (le glob prend tests/js/reader_guard.test.mjs, 10 cas de plus, console ADR 060)
-    assert "# pass 18" in result.stdout
+    # s28 : épingle amendée (le glob prend tests/js/panel_state.test.mjs, 13 cas de plus, console ADR 062)
+    assert "# pass 31" in result.stdout
 
 
 def test_reader_guard_is_a_one_line_definition_without_page_text():
@@ -61,3 +62,21 @@ def test_reader_guard_is_a_one_line_definition_without_page_text():
     assert line.rstrip().endswith("}")
     assert "document.body" not in line and "innerText" not in line
     assert "loginGate()" in line
+
+
+# --- s28 (console ADR 062, D2): panelState(), the passive snapshot of the right panel ---
+
+
+def test_panel_state_is_a_one_line_passive_definition():
+    line = _definition("panelState")
+    assert line.rstrip().endswith("}")
+    for forbidden in ("dispatchEvent", ".click(", "scrollIntoView", "location", "innerHTML", "href"):
+        assert forbidden not in line, forbidden
+    for selector in ('DivCommentListContainer', 'DivCommentContainer', 'DivCommentInputWrapper',
+                     'data-e2e="comment-input"', 'DivRelatedTabContainer', 'data-e2e="comment-icon"',
+                     'data-e2e="comment-count"', 'tux-tabbar__item-container'):
+        assert selector in line, selector
+
+
+def test_panel_state_js_is_the_helpers_iife():
+    assert sel.PANEL_STATE_JS == "(() => {" + sel._HELPERS + " return panelState();})()"

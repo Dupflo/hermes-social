@@ -151,6 +151,17 @@ def is_comments(expr):
     return "const OWNER=" in expr
 
 
+def is_panel_state(expr):
+    return expr == sel.PANEL_STATE_JS
+
+
+TAB_H = {"selector": "TAB", "x": 1575, "y": 76}
+ICON_H = {"selector": "ICON", "x": 1114, "y": 684}
+P_CLOSED = {"state": "closed", "comments_tab": None, "comment_icon": ICON_H, "comment_count": 1}
+P_RELATED = {"state": "related", "comments_tab": TAB_H, "comment_icon": ICON_H, "comment_count": 1}
+P_COMMENTS = {"state": "comments", "comments_tab": TAB_H, "comment_icon": ICON_H, "comment_count": 1}
+
+
 def is_thread(expr):
     return expr == sel.THREAD_JS
 
@@ -278,17 +289,63 @@ def test_owner_comes_from_the_constructor():
         assert "dupflodev" not in (APP / module).read_text(encoding="utf-8")
 
 
+# s28 : épingle amendée (D7, R8, console ADR 062) — panneau fermé : l'icône, puis l'onglet « Comments » si le panneau
+# s'ouvre sur « You may like ».
 def test_closed_panel_is_opened_then_replies_are_expanded():
     closed = {"login_gate": False, "panel_open": False, "comment_icon": handle("ICON"), "comments": []}
     target = {"author": "@a", "text": "x", "reply_button": handle("RB"), "view_replies": [handle("V1"), handle("V2"), handle("V3")], "replies": []}
     opened = {"login_gate": False, "panel_open": True, "comment_icon": None, "comments": [target]}
     expanded = {"login_gate": False, "panel_open": True, "comment_icon": None,
                 "comments": [dict(target, view_replies=[], replies=[{"author": OWNER, "text": "ok"}])]}
-    client = FakeClient(answers={is_comments: [closed, opened, expanded]})
+    client = FakeClient(answers={is_comments: [closed, opened, expanded], is_panel_state: [P_CLOSED, P_RELATED]})
     snap = page(client).comment_snapshot("t1", author="@a", text="x")
     clicks = [c[1] for c in client.calls if c[0] == "click_selector"]
-    assert clicks == ["ICON", "V1", "V2"]
+    assert clicks == ["ICON", "TAB", "V1", "V2"]
     assert snap is expanded
+
+
+def test_you_may_like_clicks_the_comments_tab_never_the_icon():
+    related = {"login_gate": False, "panel_open": False, "comment_icon": handle("ICON"), "comments": []}
+    opened = {"login_gate": False, "panel_open": True, "comment_icon": None, "comments": []}
+    client = FakeClient(answers={is_comments: [related, opened], is_panel_state: [P_RELATED]})
+    sleeps = []
+    snap = trp.TikTokReplyPage(client, owner=OWNER, sleep=sleeps.append).comment_snapshot("t1", author="@a", text="x")
+    assert [c[1] for c in client.calls if c[0] == "click_selector"] == ["TAB"]
+    assert sleeps == [sel.PANEL_SETTLE_S]
+    assert snap is opened
+
+
+def test_closed_panel_click_falls_back_to_the_mouse():
+    closed = {"login_gate": False, "panel_open": False, "comment_icon": handle("ICON"), "comments": []}
+    opened = {"login_gate": False, "panel_open": True, "comment_icon": None, "comments": []}
+    client = FakeClient(answers={is_comments: [closed, opened], is_panel_state: [P_CLOSED, P_COMMENTS]},
+                        mouse=True, click_error=CamofoxHTTPError(422))
+    page(client).comment_snapshot("t1", author="@a", text="x")
+    assert [c[0] for c in client.calls if c[0] in ("click_selector", "mouse")] == ["click_selector", "mouse"]
+
+
+def test_open_panel_reads_no_panel_state_and_clicks_nothing():
+    opened = {"login_gate": False, "panel_open": True, "comment_icon": handle("ICON"), "comments": []}
+    client = FakeClient(answers={is_comments: opened})
+    page(client).comment_snapshot("t1", author="@a", text="x")
+    assert not any(c[0] in ("click_selector", "mouse") for c in client.calls)
+    assert sel.PANEL_STATE_JS not in client.expressions
+
+
+def test_unknown_panel_without_tab_clicks_nothing():
+    closed = {"login_gate": False, "panel_open": False, "comment_icon": handle("ICON"), "comments": []}
+    client = FakeClient(answers={is_comments: closed, is_panel_state: {"state": "unknown", "comments_tab": None,
+                                                                       "comment_icon": handle("ICON")}})
+    page(client).comment_snapshot("t1", author="@a", text="x")
+    assert not any(c[0] in ("click_selector", "mouse") for c in client.calls)
+
+
+def test_login_gate_is_checked_before_the_panel_state():
+    client = FakeClient(answers={is_comments: {"login_gate": True, "panel_open": False, "comment_icon": handle("ICON"),
+                                               "comments": []}, is_panel_state: P_RELATED})
+    with pytest.raises(trp.LoginGate):
+        page(client).comment_snapshot("t1", author="@a", text="x")
+    assert sel.PANEL_STATE_JS not in client.expressions
 
 
 def test_login_gate_raises():
@@ -391,5 +448,7 @@ def test_no_like_no_clipboard_no_enter_in_reply_modules():
         text = (APP / module).read_text(encoding="utf-8")
         for needle in ("subprocess", "docker", "xclip", "xdotool", "execCommand", "digg", "dispatchEvent"):
             assert needle not in text, (module, needle)
-        assert re.search(r"\blike", text, re.I) is None, module
+        # s28 : épingle amendée (console ADR 062, D2) — seul le libellé de l'onglet de lecture « You may like »
+        # (panelState()) est exempté ; aucun autre « like » (aucun J'aime).
+        assert re.search(r"\blike", text.replace("You may like", ""), re.I) is None, module
         assert re.search(r"press\([^)]*[\"']Enter[\"']", text) is None, module

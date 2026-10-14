@@ -444,65 +444,8 @@ class CamofoxClient:
         return response
 
 
-_ACTIVATE_COMMENTS_TAB_JS = r'''
-(() => {
-  function clean(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
-  function visible(el) {
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && r.height > 0 && r.x >= 0 && r.y >= 0;
-  }
-  function rect(el) {
-    const r = el.getBoundingClientRect();
-    return {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)};
-  }
-  function clickElement(el) {
-    el.scrollIntoView({block: 'center', inline: 'center'});
-    el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true, view: window}));
-    el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, view: window}));
-    el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, view: window}));
-    el.click();
-  }
-  const beforeText = document.body.innerText || '';
-  const beforeHasPanel = /\b\d+\s+comments\b/i.test(beforeText) && /Add comment/i.test(beforeText);
-  const commentIcons = Array.from(document.querySelectorAll('[data-e2e="comment-icon"]'))
-    .filter(visible)
-    .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent), aria: el.getAttribute('aria-label') || ''}))
-    .filter(x => /comment/i.test(x.aria) || /^\d+[KkMm]?$/.test(x.text));
-  let clicked = null;
-  if (!beforeHasPanel && commentIcons.length) {
-    const icon = commentIcons
-      .filter(x => x.r.x > window.innerWidth * 0.45 && x.r.y > window.innerHeight * 0.35 && x.r.y < window.innerHeight * 0.9)
-      .sort((a, b) => Math.abs(a.r.x - window.innerWidth * 0.68) + Math.abs(a.r.y - window.innerHeight * 0.7)
-                  - Math.abs(b.r.x - window.innerWidth * 0.68) - Math.abs(b.r.y - window.innerHeight * 0.7))[0]
-      || commentIcons[0];
-    clickElement(icon.el);
-    clicked = {kind: 'comment_icon', text: icon.text, aria: icon.aria, rect: rect(icon.el)};
-  }
-  const rightPanel = Array.from(document.querySelectorAll('div, aside, section'))
-    .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent)}))
-    .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.width > 200 && /Comments/.test(x.text))
-    .sort((a, b) => (b.r.width * b.r.height) - (a.r.width * a.r.height))[0]?.el;
-  const scope = rightPanel || document;
-  const candidates = Array.from(scope.querySelectorAll('button, [role=button], [role=tab], div, span'))
-    .filter(visible)
-    .map(el => ({el, r: el.getBoundingClientRect(), text: clean(el.innerText || el.textContent), aria: el.getAttribute('aria-label') || '', role: el.getAttribute('role') || '', cls: String(el.className || '')}))
-    .filter(x => x.text === 'Comments' || /Comments/.test(x.aria));
-  const tab = candidates
-    .filter(x => x.r.x > window.innerWidth * 0.55 && x.r.y < 220)
-    .sort((a, b) => a.r.x - b.r.x)[0];
-  if (tab) {
-    clickElement(tab.el);
-    clicked = {kind: 'comments_tab', text: tab.text, aria: tab.aria, role: tab.role, cls: tab.cls.slice(0, 120), rect: rect(tab.el), previous: clicked};
-  }
-  return {
-    clicked: Boolean(clicked),
-    target: clicked,
-    comment_icon_candidates: commentIcons.map(x => ({text: x.text, aria: x.aria, rect: rect(x.el)})).slice(0, 5),
-    right_panel_text: clean((rightPanel || document.body).innerText || '').slice(0, 800),
-  };
-})()
-'''
-
+# s28 (console ADR 062): the comments panel is opened by trusted clicks (app/comments_panel.py, panelState() of
+# app/tiktok_reply_selectors.py); the former JS activator (synthetic events, positions in % of innerWidth) is gone.
 
 
 # s26 (console ADR 060, D1/P1): structural guard of the reader, a passive snapshot (no click, no event, no
@@ -516,7 +459,8 @@ READER_GUARD_STATES = ("ok", "login_gate", "no_signal")
 # s26 (console ADR 060, D2/P2): active wait, bounded by a monotonic clock budget, polled every GUARD_POLL_S.
 GUARD_POLL_S = 1.0
 GUARD_PAGE_WAIT_S = 20.0
-GUARD_PANEL_WAIT_S = 8.0
+# s28 (console ADR 062, D5): 2 x 6 s, a second activation at mid-budget whatever the first one did.
+GUARD_PANEL_WAIT_S = 12.0
 GUARD_EVAL_TIMEOUT_S = 10.0
 
 _READER_GUARD_FN = r"""
@@ -647,6 +591,10 @@ _COMMENT_EXTRACTION_JS = r'''
 def _expected_comment_count_from_activation(activation_result: Any) -> int | None:
     if not isinstance(activation_result, dict):
         return None
+    if "comment_count" in activation_result:
+        # s28 (console ADR 062, D6): the count of the comment icon of the viewport, read by panelState().
+        count = activation_result.get("comment_count")
+        return count if type(count) is int and count >= 0 else None
     candidates = activation_result.get("comment_icon_candidates") or []
     for candidate in candidates:
         blob = " ".join(str(candidate.get(key) or "") for key in ("text", "aria"))
@@ -923,16 +871,17 @@ def _fetch_comments_in_tab(
             trace=trace,
         )
 
-    def activate() -> Any:
-        # Generic text selectors are unsafe on TikTok: they can select the
-        # adjacent/right-rail recommendation tab ("You may like") while still
-        # reporting a successful "Comments" click. Use the DOM-scoped activator
-        # only: comment icon first, then the visible Comments tab in the right panel.
-        result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
-        if isinstance(result, dict):
-            result["fallback"] = "js_click_scoped_comments_panel"
-            result["click_errors"] = []
-        return result
+    from app.comments_panel import open_comments_panel  # local: app.comments_panel imports this module
+
+    mouse_memo: dict[str, Any] = {}
+
+    def activate(activation: dict[str, Any]) -> None:
+        # s28 (console ADR 062, D3/D4/D6): passive panelState(), then trusted clicks (« Comments » tab, or the icon
+        # when the panel is closed, never the icon while the tab is visible). One attempt recorded per activation.
+        opened = open_comments_panel(client, tab_id, pause=pause, expired=expired, memo=mouse_memo)
+        activation["attempts"].append(opened["attempt"])
+        if opened["comment_count"] is not None:
+            activation["comment_count"] = opened["comment_count"]
 
     def read_round(*, head_probe: bool) -> dict[str, Any] | None:
         """One reading round in the current tab; a dict = early stop, None = extraction done."""
@@ -944,18 +893,17 @@ def _fetch_comments_in_tab(
         # s26 (P2.2): wait for the page to be ready for the activation (replaces the fixed pause).
         if wait_guard(GUARD_PAGE_WAIT_S, _page_ready, "page") is None:
             return timeout_result
-        activation_result = activate()
-        # s26 (P2.4): wait for a readable panel (replaces the fixed 2 s pause); one re-activation at mid-budget,
-        # only when the first activation clicked nothing (click fallen before the hydration).
+        activation_result = {"method": "real_click", "attempts": [], "comment_count": None}
+        activate(activation_result)
+        # s26 (P2.4): wait for a readable panel (replaces the fixed 2 s pause). s28 (console ADR 062, D5): not readable
+        # at mid-budget => always a second activation (new panelState() + the same rule), then the rest of the budget.
         pause(GUARD_POLL_S)
         started = clock()
         g = wait_guard(GUARD_PANEL_WAIT_S / 2, _page_readable, "panel")
         if g is None:
             return timeout_result
         if not _page_readable(g):
-            clicked = isinstance(activation_result, dict) and bool(activation_result.get("clicked"))
-            if not clicked and not g["items"] and not g["panel"]:
-                activation_result = activate()
+            activate(activation_result)
             remaining = max(0.0, GUARD_PANEL_WAIT_S - (clock() - started))
             if wait_guard(remaining, _page_readable, "panel") is None:
                 return timeout_result

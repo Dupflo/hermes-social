@@ -64,6 +64,12 @@ LEGACY_JOBS_JSON = "/opt/data/cron/jobs.json"
 # without an `expired()` check stay under the try in flight: page wait end + activation 41 s, mid-budget
 # re-activation 41 s, panel wait end + extraction + final PRESENT_JS probe 71 s, re-navigation 38 s, so <= 92 s
 # (+ the head PRESENT_JS probe, 30 s, counted apart) — measured by tests/test_scan_fetch.py; 700 s is kept.
+# s28 (console ADR 062, T4): the activation became a passive panelState() (10 s) and trusted clicks (click_selector
+# 10 s, else mouse_available 5 s + mouse 10 s), `expired()` checked before every evaluation, click and pause (1.5 s);
+# the panel wait is 12 s with an unconditional second activation at mid-budget. Longest segment of the activation
+# without a check: 15 s (plugin probe + mouse), under the former 30 s activate. Measured worst gap after expiry:
+# 39 s (connected), 59 s (logged out), 67 s (drift), 30 s (closed panel, every click in 422 + mouse fallback), so a
+# try in flight stays <= 92 s (+ 30 s head probe) <= 170 s = 220 - (list_tabs 10 + probe 30 + delete_tab 10).
 LEGACY_VIDEO_BOUND_S = VIDEO_DEADLINE_S + SOLVER_BUDGET_S + 220
 
 EXIT_SCAN_FAILED = 17

@@ -229,13 +229,17 @@ Add comment...
     ]
 
 
+# s28 : épingle amendée (console ADR 062, D2/D3) — l'activation lit panelState() puis fait de vrais clics ; le JS
+# d'activation par clics synthétiques (_ACTIVATE_COMMENTS_TAB_JS) est supprimé.
 def test_activate_comments_tab_prefers_comment_icon_not_favorites_or_bookmark():
-    from app.camofox_reader import _ACTIVATE_COMMENTS_TAB_JS
+    from app.tiktok_reply_selectors import PANEL_STATE_JS
 
-    assert 'data-e2e="comment-icon"' in _ACTIVATE_COMMENTS_TAB_JS
-    assert "comment_icon" in _ACTIVATE_COMMENTS_TAB_JS
-    assert "favorite-icon" not in _ACTIVATE_COMMENTS_TAB_JS
-    assert "BookmarkWrapper" not in _ACTIVATE_COMMENTS_TAB_JS
+    assert 'data-e2e="comment-icon"' in PANEL_STATE_JS
+    assert "comment_icon" in PANEL_STATE_JS
+    assert "favorite-icon" not in PANEL_STATE_JS
+    assert "BookmarkWrapper" not in PANEL_STATE_JS
+    for synthetic in ("dispatchEvent", "MouseEvent", "scrollIntoView", ".click()"):
+        assert synthetic not in PANEL_STATE_JS
 
 
 
@@ -365,3 +369,11 @@ def test_comment_count_guard_detects_expected_comments_without_rows():
 
     assert _expected_comment_count_from_activation(activation) == 2
     assert _right_panel_looks_like_recommendations(dom) is True
+
+
+def test_comment_count_of_the_s28_activation_is_read_first():
+    from app.camofox_reader import _expected_comment_count_from_activation
+
+    assert _expected_comment_count_from_activation({"method": "real_click", "attempts": [], "comment_count": 4}) == 4
+    assert _expected_comment_count_from_activation({"method": "real_click", "attempts": [], "comment_count": 0}) == 0
+    assert _expected_comment_count_from_activation({"method": "real_click", "attempts": [], "comment_count": None}) is None

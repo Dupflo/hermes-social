@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from app.camofox_reader import CamofoxError
 from app.captcha_selectors import PRESENT_JS
+from app.comments_panel import panel_snapshot, panel_targets
 from app import tiktok_reply_selectors as sel
 
 MAX_TABS = 9
@@ -188,8 +189,7 @@ class TikTokReplyPage:
     def comment_snapshot(self, tab: str, *, author: str, text: str) -> dict[str, Any]:
         expression = sel.comments_js(self.owner)
         snap = self._snapshot(tab, expression)
-        if not snap.get("panel_open") and snap.get("comment_icon"):
-            self._click(tab, snap["comment_icon"])
+        if not snap.get("panel_open") and self._open_comments_panel(tab):
             self.sleep(sel.PANEL_SETTLE_S)
             snap = self._snapshot(tab, expression)
         target = find_target(snap, author, text)
@@ -200,6 +200,23 @@ class TikTokReplyPage:
                 self.sleep(sel.REPLIES_SETTLE_S)
             snap = self._snapshot(tab, expression)
         return snap
+
+    def _open_comments_panel(self, tab: str) -> bool:
+        """s28 (console ADR 062, D7): panelState() and the shared decision; True when something was clicked.
+
+        « You may like » => the « Comments » tab; closed => the icon, a pause, a new panelState(), then the tab if
+        « You may like »; never the icon (a toggle: it would close the panel) while the « Comments » tab is visible.
+        """
+        state = panel_snapshot(self._eval(tab, sel.PANEL_STATE_JS))
+        names = panel_targets(state)
+        for name in names:
+            self._click(tab, state[name])
+        if names == ["comment_icon"]:
+            self.sleep(sel.PANEL_SETTLE_S)
+            after = panel_snapshot(self._eval(tab, sel.PANEL_STATE_JS))
+            for name in panel_targets(after, after_icon=True):
+                self._click(tab, after[name])
+        return bool(names)
 
     def thread_snapshot(self, tab: str) -> dict[str, Any]:
         return self._snapshot(tab, sel.THREAD_JS)
