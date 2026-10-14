@@ -164,19 +164,22 @@ The hermes-console job `tiktok-scan` (every 15 min, console ADR 054) runs `scrip
 - **Session guard (console side)**: the job never starts unless the last `tiktok-session-check` verdict is
   `connected` and that check is enabled ⇒ otherwise `skipped`/`no_session`, no exec.
 - **Legacy cron guards** (never both at once): a process naming `tiktok_cron_auto_dm` in `/proc` at start ⇒
-  `skipped`/`legacy_cron_running`; before each video (bound 600 s) and each queue item (bound 660 s) the module
-  reads `/opt/data/cron/jobs.json` **read only** (`enabled`, `state`, `next_run_at` of `bf85146a1ae8`, nothing printed)
-  and stops when the cron may start within the bound ⇒ `skipped`/`legacy_cron_due`. Unreadable file ⇒ due.
+  `skipped`/`legacy_cron_running`; before each video (bound 700 s: worst case ~382 s + 240 s of solver + one
+  try's overrun) and each queue item (bound 660 s) the module reads `/opt/data/cron/jobs.json` **read only**
+  (`enabled`, `state`, `next_run_at` of `bf85146a1ae8`, nothing printed) and stops when the cron may start within the
+  bound ⇒ `skipped`/`legacy_cron_due`. Unreadable file ⇒ due.
 - **Scan**: `poll_targets(8)`, least recently attempted first; every attempt (read, empty, failed) dates
   `last_scanned_at` (`store.mark_scan_attempt`), so failures no longer hog the head. Fetch in process, own tab
   (closed after), at most 9 Camofox tabs, 240 s per video; a captcha goes to the s22 solver in the current tab,
-  never after a reload (solver time suspended from the video deadline, 240 s and 3 captchas per run).
+  never after a reload (solver time suspended from the video deadline, 240 s and 3 captchas per run; a further
+  captcha is refused without a solver call and logged `unavailable`).
 - **Budgets**: no new video after 2160 s; a queue item only starts with ≥ 720 s left before the run budget of
   4500 s (registry `timeoutSec` 4800). Videos not attempted are not dated: first in line next run.
 - **Queue**: the 3 oldest `pending_review` items (same query as the cron, no filter), each through the versioned
   processor called like the cron: `python3` of the hermes container (`SCAN_PROCESSOR_PYTHON`, resolved by the wrapper
-  before `uv run`; absolute path only, else `processor_missing`), `<repo>/scripts/process_tiktok_review_one.py <id>`,
-  cwd = this project, 600 s. Only its `stage` and `ok` are kept; its stdout/stderr (private data) never are.
+  before `uv run`; no `python3` ⇒ the wrapper exits 19, run `failed`; absolute path only, else
+  `processor_missing`), `<repo>/scripts/process_tiktok_review_one.py <id>`, cwd = this project, 600 s. Only its
+  `stage` and `ok` are kept; its stdout/stderr (private data) never are.
 - **Outcomes**:
 
   | Case | Queue | Run console |

@@ -1,6 +1,8 @@
 """s23 — scripts/console-tiktok-scan.sh, the wrapper run by the console job `tiktok-scan` (console ADR 054)."""
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "console-tiktok-scan.sh"
@@ -19,9 +21,20 @@ def test_script_runs_the_module_in_the_console_venv():
 def test_processor_python_is_resolved_before_uv():
     text = SCRIPT.read_text(encoding="utf-8")
     code = [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-    export = code.index('export SCAN_PROCESSOR_PYTHON="$(command -v python3)"')
+    resolve = code.index('if ! SCAN_PROCESSOR_PYTHON="$(command -v python3)"; then')
+    export = code.index("export SCAN_PROCESSOR_PYTHON")
     first_uv = next(i for i, line in enumerate(code) if re.search(r"\buv\b", line))
-    assert export < first_uv == code.index(EXEC)
+    assert resolve < export < first_uv == code.index(EXEC)
+
+
+def test_missing_python3_fails_the_run_with_exit_19(tmp_path):
+    # review n°1 m3: a container without python3 must not give `ok` runs whose items all end `processor_missing`.
+    # Empty PATH: `command -v python3` fails; uv is never reached (exit 127 if it were). The processor never runs.
+    bash = shutil.which("bash")
+    proc = subprocess.run([bash, str(SCRIPT)], env={"PATH": str(tmp_path)}, capture_output=True, text=True, timeout=10)
+    assert proc.returncode == 19
+    assert proc.stdout.strip().splitlines() == ["tiktok-scan: error=internal processor_python=missing"]
+    assert proc.stderr == ""
 
 
 def test_script_never_prints_the_environment():

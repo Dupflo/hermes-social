@@ -485,6 +485,12 @@ def test_fourth_captcha_of_a_run_is_refused_without_calling_the_solver(tmp_path)
     assert len(solver.calls) == 3
     assert [v["error"] for v in result.videos] == [None, None, None, "captcha_unsolved"]
     assert result.exit_code == 18
+    # review n°1 m2: the refused captcha is still logged (ADR 052), with the solver's own "no try made" outcome
+    assert [c["outcome"] for c in report.captchas] == ["solved", "solved", "solved", "unavailable"]
+    assert report.captchas[3]["seq"] == 4 and report.captchas[3]["attempts"] == []
+    assert result.counters["captchas"] == 4 and result.counters["captchas_solved"] == 3
+    payload = json.loads(ts.console_result_line(result, report)[len("CONSOLE_RESULT "):])
+    assert payload["captchas"][3] == {"seq": 4, "outcome": "unavailable", "at": report.captchas[3]["at"], "attempts": []}
 
 
 def test_solver_budget_is_per_run(tmp_path):
@@ -646,9 +652,18 @@ def imminent(path, bound, running=lambda: False):
 
 
 def test_legacy_cron_imminent_bounds(tmp_path):
-    jobs = write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 630))
-    assert ts.LEGACY_VIDEO_BOUND_S == 600 and ts.LEGACY_ITEM_BOUND_S == 660
+    # review n°1 m1: a video's worst case is ~382 s (240 s deadline + one try in flight + list_tabs 10 s + PRESENT_JS
+    # probe 30 s + delete_tab 10 s) + the run's 240 s of solver (+ one try's overrun): bound = 240 + 240 + 220 = 700 s.
+    assert ts.LEGACY_VIDEO_BOUND_S == ts.VIDEO_DEADLINE_S + ts.SOLVER_BUDGET_S + 220 == 700
+    assert ts.LEGACY_ITEM_BOUND_S == 660
+    jobs = write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 730))
     assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is False
+    assert imminent(jobs, ts.LEGACY_ITEM_BOUND_S) is False
+    write_jobs(jobs, next_run_at=iso(NOW + 680))
+    assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is True
+    assert imminent(jobs, ts.LEGACY_ITEM_BOUND_S) is False
+    write_jobs(jobs, next_run_at=iso(NOW + 630))
+    assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is True
     assert imminent(jobs, ts.LEGACY_ITEM_BOUND_S) is True
     write_jobs(jobs, next_run_at=iso(NOW + 100))
     assert imminent(jobs, ts.LEGACY_VIDEO_BOUND_S) is True
@@ -905,6 +920,18 @@ def test_main_check_only_reports_missing_processor_python_and_due_cron(main_env,
         "tiktok-scan: check targets=2 pending=2 legacy_running=0 legacy_due=1"
         " processor_sha256=missing processor_python=missing"
     )
+
+
+def test_main_check_only_legacy_due_uses_the_video_bound(main_env, tmp_path):
+    # review n°1 m1: 650 s before the cron is inside the 700 s video bound
+    main_env["monkeypatch"].setattr(ts, "_clock", lambda: NOW)
+    write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 650))
+    code, text = run_main(["--check-only"], environ={"SCAN_PROCESSOR_PYTHON": "/usr/bin/python3"})
+    assert code == 0
+    assert " legacy_due=1 " in text.strip().splitlines()[-2]
+    write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 730))
+    code, text = run_main(["--check-only"], environ={"SCAN_PROCESSOR_PYTHON": "/usr/bin/python3"})
+    assert " legacy_due=0 " in text.strip().splitlines()[-2]
 
 
 def test_main_check_only_reports_a_mismatching_processor(main_env, tmp_path):

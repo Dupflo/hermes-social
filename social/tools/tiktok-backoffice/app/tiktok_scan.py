@@ -62,8 +62,10 @@ LIST_TABS_TIMEOUT_S = 10
 LEGACY_MARKER = "tiktok_cron_auto_dm"
 LEGACY_CRON_ID = "bf85146a1ae8"
 LEGACY_JOBS_JSON = "/opt/data/cron/jobs.json"
-# A video may last its deadline + the run's solver budget + one step in flight: 600 s (orchestrator amendment, D1 b).
-LEGACY_VIDEO_BOUND_S = VIDEO_DEADLINE_S + SOLVER_BUDGET_S + 120
+# Worst case of one video (review n°1 m1): its 240 s deadline + one try in flight (~92 s) + list_tabs (10 s) +
+# PRESENT_JS probe (30 s) + delete_tab (10 s) = ~382 s, plus the run's 240 s of solver and one solver try's overrun
+# (MIN_TRY_BUDGET_S 60) ≈ 682 s, bounded by 240 + 240 + 220 = 700 s.
+LEGACY_VIDEO_BOUND_S = VIDEO_DEADLINE_S + SOLVER_BUDGET_S + 220
 LEGACY_ITEM_BOUND_S = PROCESSOR_TIMEOUT_S + 60
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -335,6 +337,12 @@ def run_scan(
             def on_captcha(tab_id: str) -> bool:
                 nonlocal solver_used, paused
                 if len(report.captchas) >= MAX_CAPTCHAS_PER_RUN:
+                    # Refused without a solver call, still logged (ADR 052): no try made => `unavailable`, like the
+                    # solver itself when its budget is spent before a first try.
+                    report.captchas.append(
+                        {"seq": len(report.captchas) + 1, "outcome": "unavailable", "at": int(clock() * 1000),
+                         "attempts": []}
+                    )
                     return False
                 began = clock()
                 try:
