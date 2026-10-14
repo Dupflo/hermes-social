@@ -98,6 +98,9 @@ VIDEO_ERRORS = frozenset(
 )
 # s26 (console ADR 060, D4/P4): sub-code of the reader's structural guard, closed list (hygiene ADR 054).
 GUARD_STATES = ("ok", "ok_retry", "captcha_late", "login_gate", "no_signal")
+# s29 (console ADR 063, D2): reason of a `target_video_incoherent` video and author check of an ok one, closed lists.
+INCOHERENT_REASONS = ("video_id_missing", "loaded_different_video", "author_link_mismatch")
+AUTHOR_CHECKS = ("match", "id_only")
 COUNTERS = (
     "videos_targeted",
     "videos_ok",
@@ -223,6 +226,13 @@ def _guard(code: Any) -> str:
     return code if isinstance(code, str) and code in GUARD_STATES else "unknown"
 
 
+def _closed(code: Any, allowed: tuple[str, ...]) -> str | None:
+    """None => no field; outside the closed list => `unknown`, never the value received."""
+    if code is None:
+        return None
+    return code if isinstance(code, str) and code in allowed else "unknown"
+
+
 def run_scan(
     *,
     store: Any,
@@ -317,8 +327,15 @@ def run_scan(
                     entry["new"] = int(ingest.get("ingested") or 0)
                     entry["reviews"] = int(ingest.get("created_reviews") or 0)
                     entry["baseline"] = 1 if baseline else 0
+                    author_check = _closed(result.get("author_check"), AUTHOR_CHECKS)
+                    if author_check is not None:
+                        entry["author_check"] = author_check
             else:
                 entry["error"] = _video_error(result.get("error"))
+                if entry["error"] == "target_video_incoherent":
+                    reason = _closed(result.get("incoherent_reason"), INCOHERENT_REASONS)
+                    if reason is not None:
+                        entry["incoherent_reason"] = reason
         store.mark_scan_attempt(url)
         if entry["error"] is None:
             counters["videos_ok"] += 1
@@ -357,12 +374,22 @@ def run_scan(
     return ScanResult(status, reason, code, counters, videos)
 
 
+def _coherence_field(v: dict[str, Any]) -> str:
+    # s29 (D2): at most one optional last field; a line without it is unchanged.
+    if v.get("error") == "target_video_incoherent" and v.get("incoherent_reason"):
+        return f" incoherent_reason={v['incoherent_reason']}"
+    if v.get("error") is None and v.get("author_check"):
+        return f" author_check={v['author_check']}"
+    return ""
+
+
 def emit_lines(result: ScanResult) -> list[str]:
     lines = []
     for v in result.videos:
         lines.append(
             f"video {v['id']}: extracted={v['extracted']} new={v['new']} reviews={v['reviews']} error={v['error'] or '-'}"
             f" baseline={v.get('baseline', 0)} guard={v.get('guard', '-')}"
+            + _coherence_field(v)
         )
     c = result.counters
     lines.append(

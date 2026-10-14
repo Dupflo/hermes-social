@@ -4,9 +4,11 @@ The JS runs under `node --test tests/js/*.test.mjs` (skipped when node is absent
 the source contract it relies on is pinned here.
 """
 
+import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,7 +25,7 @@ def _definition(name: str) -> str:
 
 
 def test_helpers_used_by_the_node_suite_are_one_line_definitions():
-    for name in ("clean", "vis", "loginGate"):
+    for name in ("clean", "vis", "loginGate", "videoAuthorHandles"):
         line = _definition(name)
         assert line.count("function ") >= 1 and line.rstrip().endswith("}")
 
@@ -47,11 +49,14 @@ def test_login_gate_node_suite():
         capture_output=True,
         text=True,
         timeout=120,
+        # s29 (R1): tests/js/video_author.test.mjs exports _COMMENT_EXTRACTION_JS with this interpreter.
+        env={**os.environ, "HERMES_PYTHON": sys.executable},
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     # s26 : épingle amendée (le glob prend tests/js/reader_guard.test.mjs, 10 cas de plus, console ADR 060)
     # s28 : épingle amendée (le glob prend tests/js/panel_state.test.mjs, 13 cas de plus, console ADR 062)
-    assert "# pass 31" in result.stdout
+    # s29 : épingle amendée (le glob prend tests/js/video_author.test.mjs, 8 cas de plus, console ADR 063)
+    assert "# pass 39" in result.stdout
 
 
 def test_reader_guard_is_a_one_line_definition_without_page_text():
@@ -80,3 +85,24 @@ def test_panel_state_is_a_one_line_passive_definition():
 
 def test_panel_state_js_is_the_helpers_iife():
     assert sel.PANEL_STATE_JS == "(() => {" + sel._HELPERS + " return panelState();})()"
+
+
+# --- s29 (console ADR 063, D1): videoAuthorHandles(), the handles of the bounded author area of the video ---
+
+
+def test_video_author_handles_never_queries_every_link_of_the_document():
+    line = _definition("videoAuthorHandles")
+    assert line.rstrip().endswith("}")
+    for forbidden in ("document.querySelectorAll('a[href*=\"/@\"]')", 'document.querySelectorAll("a[href*=\\"/@\\"]")',
+                      "document.querySelectorAll('a[href",  'document.querySelectorAll("a[href', "document.links",
+                      "dispatchEvent", ".click(", "innerHTML"):
+        assert forbidden not in line, forbidden
+    for candidate in ('[data-e2e="browse-username"]', '[data-e2e="video-author-uniqueid"]',
+                      '[data-e2e="browse-user-avatar"]', '[data-e2e="video-author-avatar"]', '[class*="DivAuthorContainer"]'):
+        assert candidate in line, candidate
+    for excluded in ("#app-header", "nav", '[data-e2e*="nav"]', '[class*="DivCommentItemWrapper"]',
+                     '[class*="DivReplyContainer"]', '[data-e2e^="comment-"]', '[class*="DivRelatedTabContainer"]',
+                     '[data-e2e="recommend-list-item-container"]', '[data-e2e="browse-video-desc"]',
+                     '[data-e2e="video-desc"]', '[data-e2e="search-common-link"]'):
+        assert excluded in line, excluded
+    assert "decodeURIComponent" in line and "catch" in line

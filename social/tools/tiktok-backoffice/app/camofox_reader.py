@@ -474,6 +474,7 @@ _COMMENT_EXTRACTION_JS = r'''
 (() => {
   const text = document.body.innerText || '';
   const g = (() => {''' + _HELPERS + _READER_GUARD_FN + r''' return readerGuard();})();
+  const vah = (() => {''' + _HELPERS + r''' try { return videoAuthorHandles(); } catch (e) { return []; } })();
   const badTexts = new Set(['Search','For You','Explore','Following','Friends','LIVE','Messages','Activity','Upload','Profile','More','Comments','Share','You may like','See translation']);
   function clean(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
   function authorFrom(el) {
@@ -581,7 +582,8 @@ _COMMENT_EXTRACTION_JS = r'''
     related_tab_active: relatedTabActive,
     body_preview: text.slice(0, 5000),
     active_right_panel_preview: activeRightPanelText.slice(0, 5000),
-    comment_nodes: comment_nodes.slice(0, 200)
+    comment_nodes: comment_nodes.slice(0, 200),
+    video_author_handles: vah,
   };
 })()
 '''
@@ -635,9 +637,30 @@ def _target_video_coherence(video_url: str, dom_result: dict[str, Any], comments
     """Detect TikTok SPA/feed incoherence before ingesting or acting.
 
     TikTok can leave location.href/title on the requested video while the visible
-    body/right panel belong to a recommended feed video. URL/title alone are not
-    enough; require the target creator handle to be present in the body/panel or
-    at least in extracted comment authors before trusting the result.
+    body/right panel belong to a recommended feed video (guard `730b9b5`).
+
+    s29 (console ADR 063, D1): the rule reads the target video id in the loaded URL and the handles of the BOUNDED
+    author area of the video (`video_author_handles`, videoAuthorHandles() of the extraction), in this order:
+
+    1. a loaded /video/ URL without the target id is `loaded_different_video` (logged in or not);
+    2. logged in, target id known and absent from the loaded URL: `video_id_missing`;
+    3. logged in, target author known, the author area gives >= 1 handle and none is the target author (case and `@`
+       ignored): `author_link_mismatch`;
+    4. otherwise coherent: `author_check` = `match` (a handle of the area is the target author) or `id_only` (the area
+       gives no handle: fallback on the id alone); `None` when the page is not `logged_in`.
+
+    The text no longer decides: TikTok shows the display name, not the handle, so the handle was in no text of a good
+    video (run 1107, 8/8 rejected). `body_has_author` / `comments_have_author` stay as diagnostics only. Every link of
+    the whole document is never read: the logged-in account is the author of the target videos, its navigation links
+    are on every page, a derived video included.
+
+    D3: `logged_in` is `g.state === 'ok'` of readerGuard() (panel or items visible), not the session. Two cases skip
+    the checks 2 and 3: (a) a really logged-out page (`login_gate`), which ends `tiktok_page_not_actionable` (scan
+    `session_lost`); (b) a logged-in page whose guard is not `ok` (panel not readable, `no_signal`, late captcha),
+    which ends `tiktok_page_not_actionable` / `captcha_*` downstream, never accepted.
+
+    No handle list in the returned dict (it is printed by cli.py): `author_links` (count), `author_link_match`
+    (boolean) and `author_check` (code) only.
     """
     target_author = _video_author_from_url(video_url)
     target_video_id = _video_id_from_url(video_url)
@@ -658,19 +681,28 @@ def _target_video_coherence(video_url: str, dom_result: dict[str, Any], comments
     logged_in = bool(dom_result.get("logged_in"))
     # s26 (console ADR 060, P1): the structural loginGate() flag of the extraction, never a body regex (diagnostic only).
     login_gate = dom_result.get("login_gate") is True
+    raw_handles = dom_result.get("video_author_handles")
+    handles = (
+        [str(item).lower().lstrip("@") for item in raw_handles if isinstance(item, str) and item.strip("@ ")]
+        if isinstance(raw_handles, list)
+        else []
+    )
+    author_link_match = bool(author_token and author_token in handles)
 
-    # Logged-out gates are handled separately: they are not a cross-video hazard,
-    # but they are still non-actionable. A different loaded /video/ URL is always
-    # incoherent; TikTok may silently jump to a recommended video while preserving
-    # the target creator in right-rail text, which previously caused false trust.
     coherent = True
     reason = None
+    author_check = None
     if loaded_is_other_video:
         coherent = False
         reason = "loaded_different_video"
-    elif target_author and loaded_has_video_id and logged_in and not (body_has_author or comments_have_author):
+    elif logged_in and target_video_id and not loaded_has_video_id:
         coherent = False
-        reason = "target_author_missing_from_loaded_body"
+        reason = "video_id_missing"
+    elif logged_in and author_token and handles and not author_link_match:
+        coherent = False
+        reason = "author_link_mismatch"
+    elif logged_in:
+        author_check = "match" if author_link_match else "id_only"
     return {
         "coherent": coherent,
         "reason": reason,
@@ -682,6 +714,9 @@ def _target_video_coherence(video_url: str, dom_result: dict[str, Any], comments
         "comments_have_author": comments_have_author,
         "logged_in": logged_in,
         "login_gate": login_gate,
+        "author_links": len(handles),
+        "author_link_match": author_link_match,
+        "author_check": author_check,
     }
 
 
@@ -989,6 +1024,8 @@ def _fetch_comments_in_tab(
             "ok": False,
             "error": "target_video_incoherent",
             "detail": coherence.get("reason"),
+            # s29 (console ADR 063, D2): the closed reason, copied on the scan's `video` line.
+            "incoherent_reason": coherence.get("reason"),
             "video_url": video_url,
             "logged_in": bool(dom_result.get("logged_in")),
             "captcha": captcha_flag,
@@ -1057,4 +1094,6 @@ def _fetch_comments_in_tab(
         "captcha": captcha_flag,
         "comments": comments,
         "diagnostics": diagnostics,
+        # s29 (console ADR 063, D2): match | id_only (None when the page is not logged_in), on the scan's `video` line.
+        "author_check": coherence.get("author_check") if coherence else None,
     }

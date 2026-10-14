@@ -967,3 +967,116 @@ def test_not_actionable_with_login_gate_is_still_session_lost(tmp_path):
         "video 7000: extracted=0 new=0 reviews=0 error=tiktok_page_not_actionable baseline=0 guard=login_gate"
     )
     assert result.counters["videos_skipped"] == 1
+
+
+# --- s29 (console ADR 063, D2): closed reason of an incoherent video, author check of an ok one ----------------------
+
+
+def incoherent_fetch(reason):
+    return {"ok": False, "error": "target_video_incoherent", "detail": reason, "incoherent_reason": reason,
+            "comments": [], "guard": "ok"}
+
+
+def test_incoherent_reason_is_appended_to_the_video_line(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[incoherent_fetch("author_link_mismatch")])
+
+    result = run(store, clock=clock, fetch=fetch)
+
+    assert result.videos[0]["incoherent_reason"] == "author_link_mismatch"
+    assert ts.emit_lines(result)[0] == (
+        "video 7000: extracted=0 new=0 reviews=0 error=target_video_incoherent baseline=0 guard=ok"
+        " incoherent_reason=author_link_mismatch"
+    )
+
+
+def test_author_check_is_appended_to_an_ok_video_line(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[{**ok_fetch(), "guard": "ok", "author_check": "id_only"}])
+
+    result = run(store, clock=clock, fetch=fetch)
+
+    assert result.videos[0]["author_check"] == "id_only"
+    assert ts.emit_lines(result)[0] == (
+        "video 7000: extracted=1 new=1 reviews=1 error=- baseline=1 guard=ok author_check=id_only"
+    )
+
+
+@pytest.mark.parametrize("value", ["x y/z", "https://www.tiktok.com/@SENTINEL_AUTHOR/video/1", 3, "", "SENTINEL_DETAIL"])
+def test_reason_and_check_outside_their_closed_lists_are_unknown_and_never_printed(tmp_path, value):
+    store = make_store(tmp_path, videos=2, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[{**incoherent_fetch(value), "detail": "SENTINEL_DETAIL"},
+                                  {**ok_fetch(), "author_check": value}])
+
+    result = run(store, clock=clock, fetch=fetch)
+    text = output_of(result)
+    lines = ts.emit_lines(result)
+
+    assert lines[0].endswith(" guard=ok incoherent_reason=unknown")
+    assert lines[1].endswith(" guard=- author_check=unknown")
+    for sentinel in SENTINELS:
+        assert sentinel not in text
+    assert "tiktok.com" not in text and "x y/z" not in text
+
+
+def test_incoherent_reason_is_ignored_on_another_error(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[{"ok": False, "error": "captcha_required", "incoherent_reason": "video_id_missing",
+                                   "author_check": "match", "comments": []}] * 2)
+
+    result = run(store, clock=clock, fetch=fetch)
+
+    assert "incoherent_reason" not in result.videos[0] and "author_check" not in result.videos[0]
+    assert ts.emit_lines(result)[0] == (
+        "video 7000: extracted=0 new=0 reviews=0 error=captcha_required baseline=0 guard=-"
+    )
+
+
+def test_author_check_is_ignored_when_the_ingestion_fails(tmp_path, monkeypatch):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[{**ok_fetch(), "author_check": "match"}])
+
+    def boom(**_kwargs):
+        raise RuntimeError("SENTINEL_DETAIL")
+
+    monkeypatch.setattr(store, "ingest_comments", boom)
+    result = run(store, clock=clock, fetch=fetch)
+
+    assert result.videos[0]["error"] == "ingest_failed"
+    assert "author_check" not in result.videos[0]
+    assert ts.emit_lines(result)[0].endswith(" error=ingest_failed baseline=0 guard=-")
+
+
+def test_results_without_the_new_fields_keep_the_video_entry_and_line_unchanged(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[{**ok_fetch(), "author_check": None}])
+
+    result = run(store, clock=clock, fetch=fetch)
+
+    assert result.videos[0] == {
+        "id": "7000", "extracted": 1, "new": 1, "reviews": 1, "error": None, "baseline": 1, "guard": "-",
+    }
+    assert ts.emit_lines(result)[0] == "video 7000: extracted=1 new=1 reviews=1 error=- baseline=1 guard=-"
+
+
+def test_incoherent_reasons_and_author_checks_closed_lists():
+    assert ts.INCOHERENT_REASONS == ("video_id_missing", "loaded_different_video", "author_link_mismatch")
+    assert ts.AUTHOR_CHECKS == ("match", "id_only")
+
+
+def test_console_result_videos_carry_codes_only(tmp_path):
+    store = make_store(tmp_path, videos=2, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[incoherent_fetch("video_id_missing"), {**ok_fetch(), "author_check": "match"}])
+
+    result = run(store, clock=clock, fetch=fetch)
+    payload = json.loads(ts.console_result_line(result, CaptchaReport()).removeprefix("CONSOLE_RESULT "))
+
+    assert payload["videos"][0]["incoherent_reason"] == "video_id_missing"
+    assert payload["videos"][1]["author_check"] == "match"

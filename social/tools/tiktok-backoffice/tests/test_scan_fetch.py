@@ -762,3 +762,60 @@ def test_the_reader_has_no_synthetic_click_left():
         for forbidden in ("dispatchEvent", "el.click()", ".click();", "scrollIntoView", "MouseEvent"):
             assert forbidden not in text, forbidden
     assert not hasattr(camofox_reader, "_ACTIVATE_COMMENTS_TAB_JS")
+
+
+# --- s29 (console ADR 063, D1/D2): the reason of an incoherent result and the author check of an ok one ---
+
+
+def authored(*handles, **kwargs):
+    """dom() whose bounded author area gives `handles` (other handles are invented)."""
+    return {**dom(**kwargs), "video_author_handles": list(handles)}
+
+
+def test_persistent_author_link_of_another_account_is_incoherent_with_its_reason():
+    fake = FakeClient(doms=(authored("other.one"),))
+
+    result = scan(fake, on_captcha=Solver(fake, []))
+
+    assert result["ok"] is False and result["error"] == "target_video_incoherent"
+    assert result["detail"] == result["incoherent_reason"] == "author_link_mismatch"
+    assert "author_check" not in result
+    assert fake.count("reload") == 2
+    assert fake.log[-1] == ("delete_tab", "tab-1", 10)
+
+
+def test_author_mismatch_then_the_target_after_a_reload_is_ok_with_match():
+    fake = FakeClient(doms=(authored("other.one"), authored("dupflodev")))
+
+    result = scan(fake, on_captcha=Solver(fake, []))
+
+    assert result["ok"] is True and result["author_check"] == "match"
+    assert "incoherent_reason" not in result
+    assert fake.count("reload") == 1
+
+
+def test_logged_in_on_a_page_without_the_target_id_is_video_id_missing():
+    fake = FakeClient(doms=(dom(url="https://www.tiktok.com/foryou"),))
+
+    result = scan(fake, on_captcha=Solver(fake, []))
+
+    assert result["ok"] is False and result["error"] == "target_video_incoherent"
+    assert result["incoherent_reason"] == "video_id_missing"
+    assert fake.count("reload") == 2
+
+
+def test_historical_dom_without_author_area_is_ok_with_id_only():
+    fake = FakeClient()
+
+    result = scan(fake, on_captcha=Solver(fake, []))
+
+    assert result["ok"] is True and result["author_check"] == "id_only"
+    assert fake.count("reload") == 0
+
+
+def test_historical_drift_carries_loaded_different_video_as_reason():
+    fake = FakeClient(doms=(INCOHERENT,))
+
+    result = scan(fake, on_captcha=Solver(fake, []))
+
+    assert result["incoherent_reason"] == "loaded_different_video"
