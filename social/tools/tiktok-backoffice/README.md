@@ -155,6 +155,56 @@ to `app.captcha_solver.solve_captcha`:
 The captcha selectors (official client of 2026-09-25) could not be checked against the real TikTok:
 `app/captcha_selectors.py` is the only file to fix.
 
+## Scan console (s23)
+
+The hermes-console job `tiktok-scan` (every 15 min, console ADR 054) runs `scripts/console-tiktok-scan.sh` →
+`python -m app.tiktok_scan` in the console venv, inside the `tiktok-browser` lock group. It replaces the Hermes cron
+`bf85146a1ae8` (`scripts/tiktok_cron_auto_dm.py --apply`), minus `sync-kanban-campaigns` (job `campaign-sync`).
+
+- **Session guard (console side)**: the job never starts unless the last `tiktok-session-check` verdict is
+  `connected` and that check is enabled ⇒ otherwise `skipped`/`no_session`, no exec.
+- **Legacy cron guards** (never both at once): a process naming `tiktok_cron_auto_dm` in `/proc` at start ⇒
+  `skipped`/`legacy_cron_running`; before each video (bound 700 s: worst case ~382 s + 240 s of solver + one
+  try's overrun) and each queue item (bound 660 s) the module reads `/opt/data/cron/jobs.json` **read only**
+  (`enabled`, `state`, `next_run_at` of `bf85146a1ae8`, nothing printed) and stops when the cron may start within the
+  bound ⇒ `skipped`/`legacy_cron_due`. Unreadable file ⇒ due.
+- **Scan**: `poll_targets(8)`, least recently attempted first; every attempt (read, empty, failed) dates
+  `last_scanned_at` (`store.mark_scan_attempt`), so failures no longer hog the head. Fetch in process, own tab
+  (closed after), at most 9 Camofox tabs, 240 s per video; a captcha goes to the s22 solver in the current tab,
+  never after a reload (solver time suspended from the video deadline, 240 s and 3 captchas per run; a further
+  captcha is refused without a solver call and logged `unavailable`).
+- **Budgets**: no new video after 2160 s; a queue item only starts with ≥ 720 s left before the run budget of
+  4500 s (registry `timeoutSec` 4800). Videos not attempted are not dated: first in line next run.
+- **Queue**: the 3 oldest `pending_review` items (same query as the cron, no filter), each through the versioned
+  processor called like the cron: `python3` of the hermes container (`SCAN_PROCESSOR_PYTHON`, resolved by the wrapper
+  before `uv run`; no `python3` ⇒ the wrapper exits 19, run `failed`; absolute path only, else
+  `processor_missing`), `<repo>/scripts/process_tiktok_review_one.py <id>`, cwd = this project, 600 s. Only its
+  `stage` and `ok` are kept; its stdout/stderr (private data) never are.
+- **Outcomes**:
+
+  | Case | Queue | Run console |
+  | --- | --- | --- |
+  | session not `connected` / check disabled | — | `skipped`/`no_session` (no exec) |
+  | legacy cron running at start | no | `skipped`/`legacy_cron_running` |
+  | legacy cron due before a video or an item | skipped | `skipped`/`legacy_cron_due` |
+  | 0 target video | **yes** (cron parity) | `skipped`/`no_targets` |
+  | captcha unsolved | no | `failed`/`exit_18` |
+  | session lost (`tiktok_page_not_actionable`) | no | `failed`/`exit_20` |
+  | tabs saturated before a video | no | next rule |
+  | no attempted video read | yes unless stopped | `failed`/`exit_17` |
+  | unexpected exception | — | `failed`/`exit_19` (class name only) |
+  | otherwise | yes | `ok`, `empty` after 4 decisive runs at `comments_extracted` = 0 |
+
+  Output: `video <id>: extracted= new= reviews= error=`, `item <id>: rc= stage= ok=`, a summary line, then
+  `CONSOLE_RESULT` last (flat counters + `videos`/`items`/`captchas`), on every exit code.
+- **`--check-only`**: no browser, no processor; prints `targets`, `pending`, `legacy_running`, `legacy_due`,
+  `processor_sha256=<ok|mismatch|missing>` and `processor_python=<path|missing>`. Never run by the console.
+- The legacy cron `scripts/tiktok_cron_auto_dm.py` stays in the repo as the parity oracle until s24.
+- **Versioned processor**: `scripts/process_tiktok_review_one.py` is the production copy of
+  `/opt/data/tmp/process_tiktok_review_one.py`, versioned as is (byte for byte, sha256
+  `08e5f29d0c87bd154588df5e603d0a5132814d3a420f03e742e39d9aa2892f93`, pinned by `tests/test_processor_versioned.py`);
+  it is replaced in s24. No test imports or runs it: it sends real TikTok messages.
+
 ## Security
 
 - Runtime DB at `/opt/data/tiktok-backoffice/tiktok_backoffice.sqlite3` (gitignored)
