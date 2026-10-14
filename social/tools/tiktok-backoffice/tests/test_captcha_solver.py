@@ -19,7 +19,7 @@ import pytest
 from app import captcha_geometry as geo
 from app import captcha_selectors as sel
 from app import captcha_solver as solver
-from app.camofox_reader import CamofoxHTTPError, CamofoxUnreachable
+from app.camofox_reader import CamofoxHTTPError, CamofoxTimeout, CamofoxUnreachable
 from app.captcha_solver import CaptchaReport, solve_captcha
 from app.sadcaptcha import SadCaptchaClient, SadCaptchaError
 
@@ -55,6 +55,14 @@ class FakeCamofox:
     followed across requests (`hold`); `requests` keeps start/end/hold/status of each /mouse request;
     `fail_requests` {n: status} fails the n-th /mouse call; `extra_cost` {n: s} slows it down; the captcha's
     REFRESH_JS rectangle (`refresh_rect`, visible from `refresh_visible_at`); `facts_at(t)` scripts the facts in time.
+
+    s27 (console ADR 061, backward compatible): the mouse x and the drag origin (x at `down`) are followed; rotate v2
+    geometry carries `probe`, its handle moved by `handle_follow` × (x − origin) while the button is held; inner and
+    outer rotations `k_in` / `k_out` × moved, sources `rsrc_in` / `rsrc_out` (`none` ⇒ no rotation read); a read with
+    the button held is logged `held_probe`, costs `probe_cost_s`, raises `probe_raises` (a CamofoxTimeout after its
+    timeout); `solve_when` (an angle) decides PRESENT_JS on the final relative rotation, compared modulo 360 (± 3°).
+    Review m1: `rest_in` / `rest_out` are the rotations shown before the drag (added to the held reading; `None` ⇒
+    the reading before the drag has no rotation, the held one counts from 0).
     """
 
     def __init__(self, variant: str | None, clock: Clock, *, verdicts=None, available=True) -> None:
@@ -83,6 +91,23 @@ class FakeCamofox:
         self.facts_at = None
         self.log: list[tuple[float, str]] = []
         self.mouse_count = 0
+        self.bar_box = dict(BOX_BAR)
+        self.handle_box = dict(BOX_HANDLE)
+        self.mouse_x: float | None = None
+        self.drag_origin: float | None = None
+        self.final_moved: float | None = None
+        self.handle_follow = 1.0
+        self.k_in = 360 / (BOX_BAR["width"] - BOX_HANDLE["width"])
+        self.k_out = 0.0
+        self.rsrc_in = "inline"
+        self.rsrc_out = "none"
+        self.probe_cost_s = 0.0
+        self.probe_raises: BaseException | None = None
+        self.solve_when: float | None = None
+        self.same_image = False
+        self.probe_extra: dict = {}
+        self.rest_in: float | None = 0.0
+        self.rest_out: float | None = 0.0
 
     # forbidden in the solver
     def navigate(self, *a, **k):
@@ -128,11 +153,17 @@ class FakeCamofox:
             raise CamofoxHTTPError(504)
         self.clock.t += cost + self.mouse_step_ms / 1000
         for action in actions:
-            if action["type"] == "down":
+            if action["type"] == "move":
+                self.mouse_x = action["x"]
+            elif action["type"] == "down":
                 self.button_down = True
+                self.drag_origin = self.mouse_x
             elif action["type"] == "up":
+                if self.button_down:
+                    self.final_moved = self.held_moved()
                 self.button_down = False
         if self.button_down and not hold:
+            self.final_moved = self.held_moved()
             self.button_down = False  # end of a request without hold: the plugin releases
         self.requests.append(
             {"start": start, "end": self.clock.t, "hold": hold, "status": 200, "down": self.button_down, "actions": actions}
@@ -155,15 +186,45 @@ class FakeCamofox:
     def click_selector(self, tab_id, selector, *, timeout=None):
         self.calls.append(("click", selector))
 
+    def held_moved(self) -> float:
+        if self.mouse_x is None or self.drag_origin is None:
+            return 0.0
+        return self.handle_follow * (self.mouse_x - self.drag_origin)
+
+    def _rotation(self, k: float, rest: float | None, moved: float, held: bool) -> float | None:
+        if not held:
+            return rest
+        return (rest or 0.0) + k * moved
+
+    def _probe(self, moved: float, held: bool) -> dict:
+        probe = {
+            "track": dict(self.bar_box),
+            "inner": {"x": 150.0, "y": 200.0, "width": 110.0, "height": 110.0},
+            "outer": {"x": 110.0, "y": 160.0, "width": 190.0, "height": 190.0},
+            "in_nat": 220,
+            "out_nat": 380,
+            "rot_in": self._rotation(self.k_in, self.rest_in, moved, held) if self.rsrc_in != "none" else None,
+            "rot_out": self._rotation(self.k_out, self.rest_out, moved, held) if self.rsrc_out != "none" else None,
+            "rsrc_in": self.rsrc_in,
+            "rsrc_out": self.rsrc_out,
+            "pair": "same" if self.same_image else "ok",
+        }
+        probe.update(self.probe_extra)
+        return probe
+
     def _geometry(self):
         kind, _ = geo.variant_parts(self.variant)
         if kind == "puzzle":
             rects = {"puzzle": BOX_PUZZLE, "handle": BOX_HANDLE}
         elif kind == "rotate":
-            rects = {"bar": BOX_BAR, "handle": BOX_HANDLE}
+            rects = {"bar": self.bar_box, "handle": self.handle_box}
         else:
             rects = {"image": BOX_PUZZLE}
         out = {"rects": rects}
+        if self.variant == "rotate_v2":
+            moved = self.held_moved() if self.button_down else 0.0
+            out["rects"] = {"bar": dict(self.bar_box), "handle": dict(self.handle_box, x=self.handle_box["x"] + moved)}
+            out["probe"] = self._probe(moved, self.button_down)
         if self.variant == "puzzle_v2":
             self.geometry_reads += 1
             if self.translate_raises_after is not None and self.geometry_reads > self.translate_raises_after:
@@ -175,6 +236,10 @@ class FakeCamofox:
         assert timeout is not None and timeout <= 10
         if expression == sel.PRESENT_JS:
             self.calls.append(("present",))
+            if self.solve_when is not None:
+                relative = (self.k_in - self.k_out) * (self.final_moved or 0.0)
+                gap = (relative - self.solve_when) % 360
+                return not min(gap, 360 - gap) <= 3
             if not self.current_verdicts:
                 self.current_verdicts = list(self.verdicts.pop(0)) if self.verdicts else [True]
             value = self.current_verdicts.pop(0) if len(self.current_verdicts) > 1 else self.current_verdicts[0]
@@ -192,6 +257,15 @@ class FakeCamofox:
             if self.refresh_rect is None or self.clock.t < self.refresh_visible_at:
                 return None
             return dict(self.refresh_rect)
+        if self.variant == "rotate_v2" and self.button_down and expression == sel.geometry_js(self.variant):
+            self.calls.append(("held_probe",))
+            self.log.append((self.clock.t, "held_probe"))
+            if self.probe_raises is not None:
+                if isinstance(self.probe_raises, CamofoxTimeout):
+                    self.clock.t += timeout
+                raise self.probe_raises
+            self.clock.t += self.probe_cost_s
+            return self._geometry()
         if self.variant and expression == sel.geometry_js(self.variant):
             self.calls.append(("geometry",))
             return self._geometry()
@@ -364,6 +438,7 @@ def test_drag_is_split_with_the_button_held_and_no_gap(variant):
     client = FakeCamofox(variant, clock)
     client.move_cost_s = geo.HUMANIZE_MOVE_MAX_S
     client.plugin_max_s = geo.PLUGIN_MAX_RUNTIME_S
+    client.probe_cost_s = 0.4
     outcome, report = run(client, clock, sad=FakeSad())
     assert outcome == "solved"
     requests = client.requests
@@ -371,9 +446,16 @@ def test_drag_is_split_with_the_button_held_and_no_gap(variant):
     assert all(r["status"] == 200 for r in requests)
     assert [r["hold"] for r in requests] == [True] * (len(requests) - 1) + [False]
     assert [r["down"] for r in requests] == [True] * (len(requests) - 1) + [False]
-    for before, after in zip(requests, requests[1:]):
-        assert after["start"] - before["end"] == 0
-        assert after["start"] - before["end"] < geo.PLUGIN_HOLD_RELEASE_S
+    # s27 : épingle amendée (lecture tenue du rotate v2, console ADR 061) — rotate v2 has ONE gap, the held read,
+    # between its last held request and the final one; rotate v1 and puzzle v1 keep no gap at all.
+    gaps = [after["start"] - before["end"] for before, after in zip(requests, requests[1:])]
+    if variant == "rotate_v2":
+        assert gaps[:-1] == [0] * (len(gaps) - 1)
+        assert 0 < gaps[-1] <= solver.HELD_PROBE_TIMEOUT_S + client.probe_cost_s
+        assert gaps[-1] < geo.PLUGIN_HOLD_RELEASE_S
+        assert requests[-1]["actions"] == [{"type": "up"}]
+    else:
+        assert gaps == [0] * len(gaps)
     for r in requests:
         assert r["end"] - r["start"] <= geo.GESTURE_REQUEST_BUDGET_S
     assert client.button_down is False
@@ -524,13 +606,17 @@ def test_a_started_gesture_is_played_to_the_end_near_the_deadline():
     clock = Clock()
     client = FakeCamofox("rotate_v2", clock)
     client.extra_cost = {1: 140.0}  # the first request leaves less than one request's timeout
+    client.probe_cost_s = 0.5
     start = clock()
     outcome, report = run(client, clock, sad=FakeSad(), budget=160.0)
     requests = client.requests
     assert len(requests) >= 2
     assert start + 160.0 - requests[0]["end"] < solver.MOUSE_TIMEOUT_S
-    for before, after in zip(requests, requests[1:]):
-        assert after["start"] == before["end"]
+    # s27 : épingle amendée (lecture tenue du rotate v2, console ADR 061) — only the held read's single gap, before
+    # the final request; nothing else between two requests of the gesture.
+    gaps = [after["start"] - before["end"] for before, after in zip(requests, requests[1:])]
+    assert gaps[:-1] == [0] * (len(gaps) - 1)
+    assert gaps[-1] == pytest.approx(client.probe_cost_s)
     assert report.diagnostics[0]["requests"] == len(requests)
 
 
@@ -797,7 +883,13 @@ LINE = re.compile(
     r"^captcha \d+\.\d+: variant=(puzzle_v1|puzzle_v2|rotate_v1|rotate_v2|shapes_v1|shapes_v2|icon_v1|icon_v2|unknown)"
     r" step=(solved|not_gone|identify|unrecognized|images|sadcaptcha|rects|gesture_timeout|gesture_error|budget|unavailable)"
     r" angle=(\d+|-) distance=(-?\d+|-) requests=\d+ moves=\d+ gesture_ms=\d+ http=(\d{3}|-)"
-    r" refresh=(clicked|missing|error|-) ms=\d+$"
+    r" refresh=(clicked|missing|error|-) ms=\d+"
+    # s27 : épingle amendée (champs de mesure du rotate v2 en fin de ligne, console ADR 061)
+    r" bar=(-?\d+|-) handle=(-?\d+|-) track=(-?\d+|-) in_w=(-?\d+|-) in_nat=(-?\d+|-) out_w=(-?\d+|-)"
+    r" pair=(ok|same|-) moved=(-?\d+|-) rot_in=(-?\d+|-) rot_out=(-?\d+|-)"
+    r" rsrc=(inline|matrix|parent|none|-) rsrc_out=(inline|matrix|parent|none|-) k1000=(-?\d+|-) target=(-?\d+|-)"
+    r" fix=(none|moved|no_read|no_rot|no_move|implausible|ambiguous|-) sense=(direct|complement|-)"
+    r" rot0_in=(-?\d+|-) rot0_out=(-?\d+|-) rot0=(read|missing|-)$"
 )
 
 
@@ -854,8 +946,11 @@ def test_diagnostic_lines_drop_unknown_values():
     report.diagnostics.append({"seq": 1, "try": 2, "variant": "rotate_v2", "step": "free text SENTINEL", "angle": 1,
                                "distance": 1, "requests": 1, "moves": 1, "gesture_ms": 1, "http": 200,
                                "captcha_button": None, "ms": 1})
+    # s27 : épingle amendée (champs de mesure du rotate v2 en fin de ligne, console ADR 061)
     assert solver.diagnostic_lines(report) == [
         "captcha 1.1: variant=unknown step=gesture_error angle=- distance=- requests=2 moves=1 gesture_ms=0 http=- refresh=- ms=3"
+        " bar=- handle=- track=- in_w=- in_nat=- out_w=- pair=- moved=- rot_in=- rot_out=- rsrc=- rsrc_out=- k1000=-"
+        " target=- fix=- sense=- rot0_in=- rot0_out=- rot0=-"
     ]
 
 
@@ -914,3 +1009,313 @@ def test_solver_module_has_no_forbidden_call():
     rest = source.replace("#captcha_refresh_button", "").replace("REFRESH_BUTTON", "").replace("REFRESH_JS", "")
     rest = rest.replace("def refresh(", "").replace("self.refresh(", "").replace("solver.refresh(", "").replace("refresh=", "")
     assert "refresh" not in rest
+
+
+# --- s27 : lecture tenue et auto-calibration du rotate v2 (console ADR 061) ---------------------------------------
+
+K_NOMINAL = 360 / (BOX_BAR["width"] - BOX_HANDLE["width"])
+START = geo.drag_start(BOX_HANDLE)
+
+
+def gesture_requests(client):
+    return [r for r in client.requests if r.get("actions") is not None and not client.is_refresh_click(r["actions"])]
+
+
+def first_try_requests(client):
+    """The /mouse requests of the first gesture (up to the first one that releases the button)."""
+    out = []
+    for r in gesture_requests(client):
+        out.append(r)
+        if not r["hold"]:
+            break
+    return out
+
+
+def line_field(line, name):
+    return re.search(rf" {name}=(\S+)", line).group(1)
+
+
+def test_rotate_v2_nominal_path_reads_held_and_does_not_correct():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "solved"
+    requests = first_try_requests(client)
+    assert [r["hold"] for r in requests] == [True, True, False]
+    assert requests[-1]["actions"] == [{"type": "up"}]
+    assert client.calls.count(("held_probe",)) == 1
+    diag = report.diagnostics[0]
+    assert diag["fix"] == "none" and diag["moves"] == 10 and diag["requests"] == 3
+    assert diag["sense"] == "direct" and diag["moved"] == 75
+    line = solver.diagnostic_lines(report)[0]
+    assert line.endswith(
+        " bar=340 handle=40 track=340 in_w=110 in_nat=220 out_w=190 pair=ok moved=75 rot_in=90 rot_out=- rsrc=inline"
+        " rsrc_out=none k1000=1200 target=75 fix=none sense=direct rot0_in=0 rot0_out=- rot0=read"
+    )
+
+
+def test_rotate_v2_wrong_scale_is_corrected_once_and_solved():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[])
+    client.k_in = 2 * K_NOMINAL
+    client.solve_when = 90
+    sad = FakeSad()
+    outcome, report = run(client, clock, sad=sad)
+    assert outcome == "solved" and len(sad.calls) == 1
+    diag = report.diagnostics[0]
+    assert diag["step"] == "solved" and diag["fix"] == "moved" and diag["moves"] == 11
+    target = round(90 / (2 * K_NOMINAL))
+    final = first_try_requests(client)[-1]["actions"]
+    assert final == [{"type": "move", "x": START[0] + target, "y": START[1]}, {"type": "wait", "ms": 300}, {"type": "up"}]
+    assert sum(1 for a in final if a["type"] == "move") == 1
+    line = solver.diagnostic_lines(report)[0]
+    assert line_field(line, "target") == str(target) and line_field(line, "k1000") == "2400"
+    assert line_field(line, "fix") == "moved"
+
+
+def test_rotate_v2_same_scene_without_the_correction_fails(monkeypatch):
+    monkeypatch.setattr(geo, "ROTATE_FIX_MIN_PX", 10**6)
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[])
+    client.k_in = 2 * K_NOMINAL
+    client.solve_when = 90
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "unsolved"
+    assert [d["step"] for d in report.diagnostics] == ["not_gone"] * 3
+    assert all(d["fix"] == "none" for d in report.diagnostics)
+
+
+def test_rotate_v2_still_cursor_is_no_move():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    client.handle_follow = 0.0
+    outcome, report = run(client, clock, sad=FakeSad())
+    diag = report.diagnostics[0]
+    assert diag["fix"] == "no_move" and diag["moved"] == 0
+    assert first_try_requests(client)[-1]["actions"] == [{"type": "up"}]
+    assert " moved=0 " in solver.diagnostic_lines(report)[0]
+
+
+def test_rotate_v2_sense_alternates_on_a_negative_scale():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[[True], [True], [True]])
+    client.k_in = -K_NOMINAL
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "unsolved"
+    assert [d["sense"] for d in report.diagnostics] == ["direct", "complement", "direct"]
+    bar, handle = BOX_BAR["width"], BOX_HANDLE["width"]
+    assert [d["distance"] for d in report.diagnostics] == [
+        geo.rotate_distance(bar, handle, 90),
+        geo.rotate_distance(bar, handle, 360 - 90),
+        geo.rotate_distance(bar, handle, 90),
+    ]
+    assert [line_field(line, "sense") for line in solver.diagnostic_lines(report)] == ["direct", "complement", "direct"]
+
+
+def test_rotate_v2_sense_kept_without_a_read():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[[True], [True], [True]])
+    client.k_in = -K_NOMINAL
+    client.probe_raises = CamofoxHTTPError(500)
+    _, report = run(client, clock, sad=FakeSad())
+    assert report.diagnostics[0]["fix"] == "no_read"
+    assert report.diagnostics[1]["sense"] == "direct"
+
+
+def test_rotate_v2_positive_scale_stays_direct():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[[True], [True], [True]])
+    _, report = run(client, clock, sad=FakeSad())
+    assert [d["sense"] for d in report.diagnostics] == ["direct"] * 3
+
+
+def test_rotate_v2_complement_scene_is_solved_at_the_second_try():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[])
+    client.k_in = -K_NOMINAL
+    client.solve_when = 90
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "solved"
+    assert [d["step"] for d in report.diagnostics] == ["not_gone", "solved"]
+    lines = solver.diagnostic_lines(report)
+    assert lines[1].startswith("captcha 1.2: variant=rotate_v2 step=solved ")
+    assert line_field(lines[1], "sense") == "complement"
+
+
+def test_rotate_v2_outer_image_turning_too():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[])
+    client.k_out = -K_NOMINAL
+    client.rsrc_out = "inline"
+    client.solve_when = 90
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "solved"
+    diag = report.diagnostics[0]
+    assert diag["fix"] == "moved" and diag["target"] == round(90 / (2 * K_NOMINAL))
+    line = solver.diagnostic_lines(report)[0]
+    assert line_field(line, "rot_out") == "-90" and line_field(line, "rsrc_out") == "inline"
+    assert line_field(line, "rot_in") == "90"
+
+
+def test_rotate_v2_rest_rotation_is_subtracted():
+    # review m1: the inner image already shows 30° before the drag; the correction measures the drag's rotation
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[])
+    client.k_in = 2 * K_NOMINAL
+    client.rest_in = 30.0
+    client.solve_when = 90
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "solved"
+    diag = report.diagnostics[0]
+    target = round(90 / (2 * K_NOMINAL))
+    assert diag["fix"] == "moved" and diag["target"] == target
+    line = solver.diagnostic_lines(report)[0]
+    assert line_field(line, "k1000") == "2400" and line_field(line, "rot_in") == "210"  # 30 + 2.4 × 75
+    assert line.endswith(" rot0_in=30 rot0_out=- rot0=read")
+
+
+def test_rotate_v2_missing_rest_read_counts_as_zero_and_is_flagged():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[])
+    client.k_in = 2 * K_NOMINAL
+    client.rest_in = None
+    client.solve_when = 90
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "solved"
+    assert report.diagnostics[0]["target"] == round(90 / (2 * K_NOMINAL))
+    line = solver.diagnostic_lines(report)[0]
+    assert line_field(line, "k1000") == "2400"
+    assert line.endswith(" rot0_in=- rot0_out=- rot0=missing")
+
+
+def test_rotate_v2_absurd_rotation_reads_never_raise():
+    # review m2: finite but enormous readings would give k = inf and round(inf) raises
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    client.rsrc_out = "inline"
+    client.probe_extra = {"rot_in": 1.7e308, "rot_out": -1.7e308}
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "solved"
+    assert report.diagnostics[0]["fix"] == "no_rot"
+    line = solver.diagnostic_lines(report)[0]
+    assert line_field(line, "k1000") == "-" and line_field(line, "fix") == "no_rot"
+    assert first_try_requests(client)[-1]["actions"] == [{"type": "up"}]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [CamofoxTimeout(), CamofoxUnreachable(), CamofoxHTTPError(500), RuntimeError("boom")],
+    ids=["timeout", "unreachable", "http500", "other"],
+)
+def test_rotate_v2_failed_held_read_releases_at_once_and_goes_on(error):
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    client.probe_raises = error
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "solved"  # never a _Stop because of the read
+    diag = report.diagnostics[0]
+    assert diag["fix"] == "no_read" and diag["step"] == "solved"
+    index = client.calls.index(("held_probe",))
+    following = client.calls[index + 1]
+    assert following[0] == "mouse" and following[2] == [{"type": "up"}] and following[3] is False
+    requests = first_try_requests(client)
+    assert requests[-1]["start"] - requests[-2]["end"] <= solver.HELD_PROBE_TIMEOUT_S
+    assert client.button_down is False
+    assert line_field(solver.diagnostic_lines(report)[0], "fix") == "no_read"
+
+
+def test_rotate_v2_error_in_the_decision_still_releases(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("decision")
+
+    monkeypatch.setattr(geo, "rotate_target", boom)
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    with pytest.raises(RuntimeError):
+        run(client, clock, sad=FakeSad())
+    requests = first_try_requests(client)
+    assert requests[-1]["actions"] == [{"type": "up"}] and requests[-1]["hold"] is False
+    assert client.button_down is False
+
+
+def test_rotate_v2_camofox_unreachable_for_the_final_request_is_unavailable():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    original = client.mouse
+
+    def mouse(tab_id, actions, *, hold=False, timeout=25.0):
+        if client.calls.count(("held_probe",)) and actions == [{"type": "up"}]:
+            client.calls.append(("mouse", tab_id, actions, hold, timeout))
+            raise CamofoxUnreachable()
+        return original(tab_id, actions, hold=hold, timeout=timeout)
+
+    client.mouse = mouse
+    outcome, report = run(client, clock, sad=FakeSad())
+    assert outcome == "unavailable"
+    assert report.diagnostics[0]["step"] == "unavailable"
+
+
+def _bare_solver(clock):
+    return solver._Solver(
+        None, "tab-1", None, clock=clock, sleep=clock.sleep, rng=random.Random(1), deadline=clock() + 240
+    )
+
+
+def test_rotate_v2_bounds():
+    bare = _bare_solver(Clock())
+    assert solver.ROTATE_V2_MAX_REQUESTS == solver.DRAG_MAX_REQUESTS == 3
+    assert solver.HELD_PROBE_TIMEOUT_S == 2.5
+    assert bare._answer_bound("rotate_v2") == 132.5
+    # unchanged (values at e47d7ae)
+    assert bare._answer_bound("rotate_v1") == 130.0
+    assert bare._answer_bound("puzzle_v1") == 130.0
+
+
+@pytest.mark.parametrize(("budget", "paid"), [(147.4, False), (147.6, True)])
+def test_rotate_v2_paid_call_needs_147_5_seconds(budget, paid):
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock, verdicts=[[True], [True], [True]])
+    sad = FakeSad()
+    run(client, clock, sad=sad, budget=budget)
+    assert (len(sad.calls) >= 1) is paid
+
+
+def test_rotate_v2_final_request_sent_even_past_the_deadline():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    client.probe_cost_s = 500.0  # the deadline is crossed during the held read
+    outcome, report = run(client, clock, sad=FakeSad())
+    requests = first_try_requests(client)
+    assert requests[-1]["actions"] == [{"type": "up"}] and requests[-1]["hold"] is False
+    assert client.button_down is False
+    assert report.diagnostics[0]["step"] == "budget"
+    assert outcome == "unsolved"
+
+
+def test_rotate_v2_probe_hygiene():
+    clock = Clock()
+    client = FakeCamofox("rotate_v2", clock)
+    client.probe_extra = {"src": "https://p16-sign.ibyteimg.com/SENTINEL_SRC.png", "pair": "SENTINEL_SRC",
+                          "rsrc_in": "https://SENTINEL_SRC"}
+    _, report = run(client, clock, sad=FakeSad())
+    text = "\n".join(solver.diagnostic_lines(report))
+    assert "SENTINEL_SRC" not in text and "ibyteimg" not in text and "https" not in text
+    assert line_field(text, "pair") == "-" and line_field(text, "rsrc") == "-"
+    for line in solver.diagnostic_lines(report):
+        assert LINE.fullmatch(line), line
+    clock = Clock()
+    same = FakeCamofox("rotate_v2", clock)
+    same.same_image = True
+    _, report = run(same, clock, sad=FakeSad())
+    assert line_field(solver.diagnostic_lines(report)[0], "pair") == "same"
+
+
+def test_other_variants_have_no_measure_fields():
+    for variant in ("rotate_v1", "puzzle_v1", "shapes_v2"):
+        clock = Clock()
+        _, report = run(FakeCamofox(variant, clock), clock, sad=FakeSad())
+        line = solver.diagnostic_lines(report)[0]
+        assert line.endswith(
+            " bar=- handle=- track=- in_w=- in_nat=- out_w=- pair=- moved=- rot_in=- rot_out=- rsrc=- rsrc_out=-"
+            " k1000=- target=- fix=- sense=- rot0_in=- rot0_out=- rot0=-"
+        ), line

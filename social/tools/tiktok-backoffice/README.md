@@ -143,6 +143,13 @@ to `app.captcha_solver.solve_captcha`:
   image's persistence/vnc/youtube plugins — and declared in `deploy/camofox.config.json`). It is only loaded after
   camofox is recreated. Before any paid call, the solver probes `GET /console-mouse/health`
   (`CamofoxClient.mouse_available`): 404 (plugin not loaded), 403 or unreachable ⇒ `unavailable`, manual login.
+- **Rotate v2 held read (s27, hermes-console ADR 061)**: the drag stops at its estimate with the button still held,
+  the page is read once (cursor offset, rotation of both images, a 2.5 s timeout per network step — so at most
+  2 × 2.5 s, not 2.5 s in total —, any error ⇒ plain release), at most one correction is played from the °/px
+  observed on the rotation produced by the drag (held reading minus the reading before the drag, missing ⇒ 0;
+  a reading beyond 720° is unreadable), then the button is released; the `captcha …` line ends with the measures
+  `bar= handle= track= in_w= in_nat= out_w= pair= moved= rot_in= rot_out= rsrc= rsrc_out= k1000= target= fix= sense=
+  rot0_in= rot0_out= rot0=`.
 - **Bounds**: at most 3 tries per captcha and 3 captchas per run; a budget of `SOLVER_BUDGET_S` = 240 s per run,
   suspended from the 180 s login deadline; a try only starts with ≥ 60 s left. A SadCaptcha error stops solving
   for the whole run (no retry). The page is never reloaded; rotate v2 uses the captcha's own refresh button.

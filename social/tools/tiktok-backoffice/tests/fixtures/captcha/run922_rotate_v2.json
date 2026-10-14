@@ -1,0 +1,24 @@
+{
+  "source": "hermes-console docs/deploy-evidence/s26-tiktok-reader-guard.md l. 51-60 (run 922, failed/exit_18, three rotate v2 tries not_gone); no content data",
+  "variant": "rotate_v2",
+  "observed": [
+    {"try": 1, "step": "not_gone", "angle": 166, "distance": 130, "requests": 2, "moves": 10, "gesture_ms": 11433, "refresh": "clicked", "ms": 20277},
+    {"try": 2, "step": "not_gone", "angle": 148, "distance": 116, "requests": 2, "moves": 10, "gesture_ms": 14610, "refresh": "clicked", "ms": 23571},
+    {"try": 3, "step": "not_gone", "angle": 99, "distance": 78, "requests": 2, "moves": 10, "gesture_ms": 10693, "refresh": "-", "ms": 19539}
+  ],
+  "geometry": {
+    "bar_width": 348,
+    "handle_width": 64,
+    "note": "deduced: the three (angle, distance) pairs impose bar - handle in [283.64, 284.10) px"
+  },
+  "simulation": {
+    "move_cost_s": 1.2,
+    "plugin_max_s": 20,
+    "facts_cost_s": 0.5,
+    "image_cost_s": 0.5,
+    "sadcaptcha_cost_s": 2.0,
+    "probe_cost_s": 0.3,
+    "k_in_ratio": 2.0,
+    "note": "durations calibrated on the run 922 logs, not measured: chosen so the simulated gesture_ms / ms land near the observed lines"
+  }
+}

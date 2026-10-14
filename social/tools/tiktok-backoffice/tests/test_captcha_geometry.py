@@ -304,3 +304,259 @@ def test_validate_response_accepts_bounds():
 )
 def test_valid_box(box, ok):
     assert geo.valid_box(box) is ok
+
+
+# --- s27 : lecture tenue et auto-calibration du rotate v2 (console ADR 061) ---------------------------------------
+
+# drag_actions((10, 10), 170, random.Random(42)) captured at e47d7ae, before the gesture was cut in two (P2, D4).
+DRAG_ACTIONS_E47D7AE = [
+    {"type": "move", "x": 10.0, "y": 10.0}, {"type": "wait", "ms": 744}, {"type": "down"},
+    {"type": "move", "x": 39.16666666666667, "y": 10.0}, {"type": "wait", "ms": 10},
+    {"type": "move", "x": 68.33333333333334, "y": 10.0}, {"type": "wait", "ms": 10},
+    {"type": "move", "x": 97.5, "y": 10.0}, {"type": "wait", "ms": 10},
+    {"type": "move", "x": 126.66666666666667, "y": 10.0}, {"type": "wait", "ms": 10},
+    {"type": "move", "x": 155.83333333333334, "y": 10.0}, {"type": "wait", "ms": 10},
+    {"type": "move", "x": 185.0, "y": 10.0}, {"type": "wait", "ms": 10}, {"type": "wait", "ms": 250},
+    {"type": "move", "x": 183.33333333333334, "y": 11.0}, {"type": "wait", "ms": 5},
+    {"type": "move", "x": 181.66666666666666, "y": 9.0}, {"type": "wait", "ms": 5}, {"type": "wait", "ms": 200},
+    {"type": "move", "x": 180.0, "y": 10.0}, {"type": "wait", "ms": 300}, {"type": "up"},
+]
+
+
+def test_drag_actions_is_the_e47d7ae_literal():
+    assert geo.drag_actions((10, 10), 170, random.Random(42)) == DRAG_ACTIONS_E47D7AE
+
+
+@pytest.mark.parametrize("offset", OFFSETS)
+def test_drag_actions_is_the_held_part_then_the_release(offset):
+    start = (120.5, 300.25)
+    for seed in SEEDS:
+        held = geo.drag_actions_held(start, offset, random.Random(seed))
+        assert geo.drag_actions(start, offset, random.Random(seed)) == held + geo.finish_actions(start, None)
+        assert held[-1] == {"type": "wait", "ms": 300}  # the wait after the final move is kept before the read
+        assert [a["type"] for a in held].count("up") == 0
+
+
+def test_finish_actions():
+    start = (120.5, 300.25)
+    assert geo.finish_actions(start, None) == [{"type": "up"}]
+    assert geo.finish_actions(start, 12) == [
+        {"type": "move", "x": 132.5, "y": 300.25},
+        {"type": "wait", "ms": 300},
+        {"type": "up"},
+    ]
+
+
+@pytest.mark.parametrize("offset", OFFSETS)
+def test_held_drag_fits_in_two_held_requests(offset):
+    from app.captcha_solver import DRAG_MAX_REQUESTS
+
+    for seed in SEEDS:
+        chunks = geo.split_gesture(geo.drag_actions_held((120.5, 300.25), offset, random.Random(seed)))
+        assert 1 <= len(chunks) <= DRAG_MAX_REQUESTS - 1
+        assert all(hold is True for _, hold in chunks)
+        for chunk, _ in chunks:
+            assert geo.request_worst_case_s(chunk) <= geo.GESTURE_REQUEST_BUDGET_S
+
+
+def test_held_gap_stays_under_the_plugin_release():
+    from app.captcha_solver import HELD_PROBE_TIMEOUT_S
+
+    final = geo.finish_actions((120.5, 300.25), 12)
+    assert geo.request_worst_case_s(final) <= geo.GESTURE_REQUEST_BUDGET_S
+    assert 2 * HELD_PROBE_TIMEOUT_S + geo.request_worst_case_s(final) < geo.PLUGIN_HOLD_RELEASE_S
+
+
+RUN922 = _load(FIXTURES / "run922_rotate_v2.json")
+TRAVEL = RUN922["geometry"]["bar_width"] - RUN922["geometry"]["handle_width"]
+K_NOMINAL = 360 / TRAVEL
+
+
+def _fix(angle, *, moved=None, k=K_NOMINAL, rot_in=None, rot_out=None, rsrc_in="inline", rsrc_out="none",
+         sense="direct", distance=None, travel=TRAVEL):
+    wanted = angle if sense == "direct" else 360 - angle
+    if distance is None:
+        distance = geo.rotate_distance(RUN922["geometry"]["bar_width"], RUN922["geometry"]["handle_width"], wanted)
+    if moved is None:
+        moved = distance
+    if rot_in is None and k is not None and moved is not None:
+        rot_in = k * moved
+    return geo.rotate_target(angle, travel, distance, moved, rot_in, rot_out, rsrc_in, rsrc_out, sense), distance
+
+
+def test_run922_fixture_and_the_story_angles():
+    assert TRAVEL == 284
+    bar, handle = RUN922["geometry"]["bar_width"], RUN922["geometry"]["handle_width"]
+    for observed in RUN922["observed"]:
+        assert geo.rotate_distance(bar, handle, observed["angle"]) == observed["distance"]
+    assert [o["angle"] for o in RUN922["observed"]] == [166, 148, 99]
+    assert [o["distance"] for o in RUN922["observed"]] == [130, 116, 78]
+    assert geo.rotate_distance(bar, handle, 0) == 0
+    assert geo.rotate_distance(bar, handle, 359) == 283
+    assert geo.rotate_distance(bar, handle, 360) == 284
+
+
+@pytest.mark.parametrize("angle", [166, 148, 99])
+def test_rotate_target_at_the_nominal_scale_keeps_the_estimate(angle):
+    fix, distance = _fix(angle)
+    assert fix.code == "none"
+    assert fix.cursor == distance
+
+
+def test_rotate_target_double_scale_halves_the_target():
+    # the outer image turns the other way: the relative rotation is twice the inner one
+    distance = geo.rotate_distance(348, 64, 99)
+    rot_in = K_NOMINAL * distance
+    fix, _ = _fix(99, rot_in=rot_in, rot_out=-rot_in, rsrc_out="inline")
+    assert fix.code == "moved"
+    assert fix.k == pytest.approx(2 * K_NOMINAL)
+    assert fix.target == round(99 / (2 * K_NOMINAL))
+    assert abs(fix.target - distance / 2) <= 1
+    assert fix.cursor == distance + (fix.target - distance)
+
+
+def test_rotate_target_half_scale_is_bounded_to_the_travel():
+    fix, distance = _fix(200, k=K_NOMINAL / 2)
+    assert round(200 / (K_NOMINAL / 2)) == 316
+    assert fix.code == "moved" and fix.target == 284
+    assert fix.cursor == distance + (284 - distance)
+
+
+def test_rotate_target_half_scale_166():
+    fix, distance = _fix(166, k=K_NOMINAL / 2)
+    assert fix.code == "moved" and fix.target == 262
+    assert fix.cursor == distance + (262 - distance)
+
+
+def test_rotate_target_compensates_a_lagging_cursor():
+    distance = geo.rotate_distance(348, 64, 166)
+    fix, _ = _fix(166, moved=distance - 8)
+    assert fix.code == "moved"
+    assert fix.cursor == distance + (fix.target - (distance - 8))
+
+
+def test_rotate_target_still_cursor():
+    fix, _ = _fix(166, moved=3, distance=130)
+    assert fix.code == "no_move"
+    assert fix.cursor == 130
+    short, _ = _fix(15, moved=3, distance=12)
+    assert 12 < 2 * geo.ROTATE_MIN_MOVED_PX
+    assert short.code == "none" and short.cursor == 12
+
+
+def test_rotate_target_without_a_read():
+    fix, distance = _fix(166, rot_in=None, k=None)
+    assert fix.code == "no_rot" and fix.cursor == distance
+    no_read = geo.rotate_target(166, TRAVEL, 130, None, None, None, None, None, "direct")
+    assert no_read.code == "no_read" and no_read.cursor == 130
+
+
+def test_rotate_target_implausible_scale():
+    fix, distance = _fix(99, k=5 * K_NOMINAL)
+    assert fix.code == "implausible" and fix.cursor == distance
+
+
+def test_rotate_target_ambiguity_is_judged_per_image_on_the_raw_read():
+    assert _fix(170, rot_in=170, rsrc_in="matrix")[0].code == "ambiguous"
+    assert _fix(210, rot_in=210, rsrc_in="inline")[0].code in ("none", "moved")
+    distance = geo.rotate_distance(348, 64, 100)
+    assert _fix(100, rot_in=100, rsrc_in="inline", rot_out=-160, rsrc_out="matrix", moved=distance)[0].code == "ambiguous"
+    assert _fix(120, rot_in=120, rsrc_in="parent")[0].code in ("none", "moved")
+    assert _fix(160, rot_in=160, rsrc_in="parent")[0].code == "ambiguous"
+
+
+def test_rotate_target_negative_rotation_has_the_same_target():
+    positive, _ = _fix(99, k=2 * K_NOMINAL)
+    negative, _ = _fix(99, k=-2 * K_NOMINAL)
+    assert negative.target == positive.target and negative.cursor == positive.cursor
+    assert negative.k == pytest.approx(-2 * K_NOMINAL)
+
+
+def test_rotate_target_complement_sense():
+    assert geo.rotate_wanted(166, "complement") == 194
+    assert geo.rotate_wanted(166, "direct") == 166
+    fix, distance = _fix(166, sense="complement", k=2 * K_NOMINAL)
+    assert distance == geo.rotate_distance(348, 64, 194)
+    assert fix.target == round(194 / (2 * K_NOMINAL))
+
+
+def test_rotate_target_small_cases():
+    fix = geo.rotate_target(0, TRAVEL, 0, 0, 0, None, "inline", "none", "direct")
+    assert fix.code == "none" and fix.cursor == 0
+    # |target − moved| = 1 ⇒ no correction
+    one = geo.rotate_target(166, TRAVEL, 130, 130, K_NOMINAL * 130, None, "inline", "none", "direct")
+    assert abs(one.target - 130) == 1 and one.code == "none" and one.cursor == 130
+    # the cursor is never negative
+    back = geo.rotate_target(0, TRAVEL, 0, 40, K_NOMINAL * 40, None, "inline", "none", "direct")
+    assert back.code == "moved" and back.cursor == 0
+
+
+BAD = (None, float("nan"), float("inf"), float("-inf"), "x", True)
+
+
+@pytest.mark.parametrize("position", range(9))
+def test_rotate_target_never_raises(position):
+    good = [166, TRAVEL, 130, 130, K_NOMINAL * 130, 0.0, "inline", "inline", "direct"]
+    for bad in BAD:
+        args = list(good)
+        args[position] = bad
+        fix = geo.rotate_target(*args)
+        assert fix.code in geo.FIX_CODES
+        assert isinstance(fix.cursor, int) and fix.cursor >= 0
+
+
+def test_rotate_target_subtracts_the_rest_rotation():
+    # review m1: the inner image already shows 30° before the drag; only the drag's rotation measures k
+    distance = geo.rotate_distance(348, 64, 99)
+    rest = geo.rotate_target(99, TRAVEL, distance, distance, 30 + 2 * K_NOMINAL * distance, None, "inline", "none",
+                             "direct", rot0_in=30)
+    assert rest.code == "moved" and rest.k == pytest.approx(2 * K_NOMINAL)
+    assert rest.target == round(99 / (2 * K_NOMINAL))
+    nominal = geo.rotate_target(99, TRAVEL, distance, distance, 30 + K_NOMINAL * distance, None, "inline", "none",
+                                "direct", rot0_in=30)
+    assert nominal.code == "none" and nominal.cursor == distance
+    # the outer image's rest rotation is subtracted the same way
+    outer = geo.rotate_target(99, TRAVEL, distance, distance, K_NOMINAL * distance, -20 - K_NOMINAL * distance,
+                              "inline", "inline", "direct", rot0_out=-20)
+    assert outer.k == pytest.approx(2 * K_NOMINAL) and outer.target == rest.target
+
+
+@pytest.mark.parametrize("missing", [None, float("nan"), float("inf"), "x", True])
+def test_rotate_target_missing_rest_rotation_is_zero(missing):
+    distance = geo.rotate_distance(348, 64, 99)
+    args = (99, TRAVEL, distance, distance, 2 * K_NOMINAL * distance, None, "inline", "none", "direct")
+    assert geo.rotate_target(*args, rot0_in=missing, rot0_out=missing) == geo.rotate_target(*args)
+
+
+def test_rotate_rest_state():
+    assert geo.rotate_rest_state(90, None, 0, None) == "read"
+    assert geo.rotate_rest_state(90, -90, 0, 5) == "read"
+    assert geo.rotate_rest_state(90, None, None, None) == "missing"
+    assert geo.rotate_rest_state(90, -90, 0, None) == "missing"
+    assert geo.rotate_rest_state(None, None, None, None) == "read"  # nothing held to subtract from
+    assert geo.REST_STATES == ("read", "missing")
+
+
+@pytest.mark.parametrize(
+    "rot_in, rot_out, rot0_in, rot0_out",
+    [
+        (1.7e308, -1.7e308, 0.0, 0.0),
+        (1e6, None, 0.0, 0.0),
+        (90.0, 1e6, 0.0, 0.0),
+        (90.0, None, 1e6, 0.0),
+        (90.0, None, 0.0, -1e6),
+    ],
+)
+def test_rotate_target_absurd_readings_are_unreadable(rot_in, rot_out, rot0_in, rot0_out):
+    # review m2: never an infinite k (round(inf) raises), an absurd reading is no reading
+    fix = geo.rotate_target(166, TRAVEL, 130, 130, rot_in, rot_out, "inline", "inline", "direct",
+                            rot0_in=rot0_in, rot0_out=rot0_out)
+    assert fix.code == "no_rot" and fix.k is None and fix.cursor == 130
+
+
+def test_closed_lists():
+    assert geo.FIX_CODES == ("none", "moved", "no_read", "no_rot", "no_move", "implausible", "ambiguous")
+    assert geo.SENSES == ("direct", "complement")
+    assert geo.ROTATE_SOURCES == ("inline", "matrix", "parent", "none")
+    assert (geo.ROTATE_MIN_MOVED_PX, geo.ROTATE_FIX_MIN_PX, geo.ROTATE_AMBIGUOUS_DEG) == (10, 2, 150)
+    assert (geo.ROTATE_K_MIN_RATIO, geo.ROTATE_K_MAX_RATIO) == (0.25, 4)

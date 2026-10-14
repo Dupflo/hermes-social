@@ -161,6 +161,7 @@ def geometry_js(variant: str) -> str:
             " const m = w ? /translateX\\((-?\\d+(?:\\.\\d+)?)/.exec(String(w.getAttribute('style') || '')) : null;"
             " out.translate_x = m ? Math.trunc(Number(m[1])) : null;"
         )
+    probe = _ROTATE_V2_PROBE if variant == "rotate_v2" else ""
     return (
         "(() => {"
         + _HELPERS
@@ -168,6 +169,36 @@ def geometry_js(variant: str) -> str:
         " return { x: r.x, y: r.y, width: r.width, height: r.height }; };"
         " const out = { rects: {" + rects + " } };"
         + translate
+        + probe
         + " return out;"
         " })()"
     )
+
+
+# s27 (console ADR 061): numbers and codes read with the rotate v2 rectangles, before the drag and button held.
+# Rotation of an image: the inline `rotate(<n>deg)` of its style attribute (sign and values > 180° kept) ⇒ inline;
+# else atan2(b, a) of its computed matrix ⇒ matrix; else the same on its parent ⇒ parent; else null / none.
+# The two image sources are only compared (`pair`), never returned.
+_ROTATE_V2 = ELEMENTS["rotate_v2"]
+_ROTATE_V2_PROBE = (
+    " const box = (el) => { if (!el) return null; const r = el.getBoundingClientRect();"
+    " return { x: r.x, y: r.y, width: r.width, height: r.height }; };"
+    " const own = (el) => {"
+    " const m = /rotate\\((-?\\d+(?:\\.\\d+)?)deg\\)/.exec(String(el.getAttribute('style') || ''));"
+    " if (m) return [Number(m[1]), 'inline'];"
+    " const k = /^matrix\\(\\s*(-?[\\d.e+-]+)\\s*,\\s*(-?[\\d.e+-]+)/.exec(String(getComputedStyle(el).transform || ''));"
+    " if (k) return [Math.atan2(Number(k[2]), Number(k[1])) * 180 / Math.PI, 'matrix'];"
+    " return null; };"
+    " const turn = (el) => { if (!el) return [null, 'none']; const a = own(el); if (a) return a;"
+    " const p = el.parentElement ? own(el.parentElement) : null; return p ? [p[0], 'parent'] : [null, 'none']; };"
+    " const nat = (el) => el ? el.naturalWidth : null;"
+    f" const hd = first({json.dumps(_ROTATE_V2['handle'])});"
+    f" const ii = first({json.dumps(_ROTATE_V2['inner'])});"
+    f" const oo = first({json.dumps(_ROTATE_V2['outer'])});"
+    " const ri = turn(ii); const ro = turn(oo);"
+    " const si = ii ? String(ii.currentSrc || '') : ''; const so = oo ? String(oo.currentSrc || '') : '';"
+    " out.probe = {"
+    " track: box(hd ? hd.parentElement : null), inner: box(ii), outer: box(oo),"
+    " in_nat: nat(ii), out_nat: nat(oo), rot_in: ri[0], rot_out: ro[0], rsrc_in: ri[1], rsrc_out: ro[1],"
+    " pair: (ii && oo) ? (si !== '' && si === so ? 'same' : 'ok') : null };"
+)

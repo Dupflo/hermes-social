@@ -11,13 +11,18 @@ s25 : geste réduit et découpé sous humanize, console ADR 059. Camoufox runs w
 move is a humanised cursor movement (up to ~1.5 s each) and the plugin cuts a request at 20 s (504). A drag
 is therefore at most 10 moves without any `steps`, and split_gesture() cuts a gesture into requests whose
 worst case stays under GESTURE_REQUEST_BUDGET_S, the button held between requests (plugin `hold`).
+
+s27 : lecture tenue et auto-calibration du rotate v2, console ADR 061. drag_actions = drag_actions_held (the same
+gesture without its final `up`, its last `wait 300` kept) + finish_actions(start, None) = [up], same list as
+before for a given seed. Rotate v2 reads the page with the button still held between the two, and
+rotate_target decides at most one correction (finish_actions(start, cursor)) from the observed °/px.
 """
 
 from __future__ import annotations
 
 import math
 import random
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, NamedTuple, Sequence
 
 VARIANTS = (
     "puzzle_v1",
@@ -83,6 +88,99 @@ def rotate_distance(bar_width: float, handle_width: float, angle: float) -> int:
     return int(((bar_width - handle_width) * angle) / 360)
 
 
+# s27 (console ADR 061): the single correction of a rotate v2 drag, from the rotation read with the button held.
+ROTATE_MIN_MOVED_PX = 10  # below, the cursor did not follow (no_move), when the drag was ≥ 2 × this
+ROTATE_FIX_MIN_PX = 2  # ≈ 2.5° at the nominal scale: below, no correction
+ROTATE_K_MIN_RATIO = 0.25  # observed °/px over the nominal 360 / travel, outside ⇒ implausible
+ROTATE_K_MAX_RATIO = 4
+ROTATE_AMBIGUOUS_DEG = 150  # a matrix (atan2) read folds at ±180°: beyond, ambiguous
+ROTATE_MAX_ABS_DEG = 720  # review m2: a reading beyond two turns is absurd, treated as unreadable (no_rot)
+FIX_CODES = ("none", "moved", "no_read", "no_rot", "no_move", "implausible", "ambiguous")
+SENSES = ("direct", "complement")
+ROTATE_SOURCES = ("inline", "matrix", "parent", "none")
+REST_STATES = ("read", "missing")  # review m1: the rotations read before the drag (the `rot0=` field)
+
+
+class RotateFix(NamedTuple):
+    cursor: int  # final cursor offset of the drag (px from the start point)
+    code: str  # FIX_CODES
+    target: int | None  # wanted cursor position, in cursor px
+    k: float | None  # observed degrees per cursor px, signed
+
+
+def _finite(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def rotate_wanted(angle: float, sense: str) -> float:
+    """The rotation to reach: the SadCaptcha angle, or its complement to 360 (s27, P4)."""
+    return 360 - angle if sense == "complement" else angle
+
+
+def _rest(value: Any) -> float:
+    """A rotation read before the drag; missing or non-finite ⇒ 0 (review m1)."""
+    return float(value) if _finite(value) else 0.0
+
+
+def rotate_rest_state(rot_in: Any, rot_out: Any, rot0_in: Any, rot0_out: Any) -> str:
+    """`missing` when a held rotation is used while its reading before the drag is missing (taken as 0)."""
+    if (_finite(rot_in) and not _finite(rot0_in)) or (_finite(rot_out) and not _finite(rot0_out)):
+        return "missing"
+    return "read"
+
+
+def rotate_target(
+    angle: Any,
+    travel: Any,
+    distance: Any,
+    moved: Any,
+    rot_in: Any,
+    rot_out: Any,
+    rsrc_in: Any,
+    rsrc_out: Any,
+    sense: Any = "direct",
+    *,
+    rot0_in: Any = 0.0,
+    rot0_out: Any = 0.0,
+) -> RotateFix:
+    """At most one correction of a held rotate v2 drag (s27, console ADR 061, P3). Never raises.
+
+    `travel` = bar − handle (the course of rotate_distance), `distance` = the estimate already played, `moved` =
+    cursor x held − cursor x before the drag, `rot_in`/`rot_out` = rotations read held (degrees), `rsrc_*` = their
+    source (ROTATE_SOURCES), `rot0_*` = rotations read before the drag (review m1: subtracted, so k measures the
+    rotation produced by the drag; missing ⇒ 0). A reading beyond ROTATE_MAX_ABS_DEG is unreadable (review m2).
+    Any other code than `moved` keeps `distance`.
+    """
+    base = max(0, int(distance)) if _finite(distance) else 0
+    if not (_finite(angle) and _finite(travel) and travel > 0 and _finite(distance)):
+        return RotateFix(base, "no_read", None, None)
+    if not _finite(moved):
+        return RotateFix(base, "no_read", None, None)
+    if not _finite(rot_in) or any(
+        _finite(value) and abs(value) > ROTATE_MAX_ABS_DEG for value in (rot_in, rot_out, rot0_in, rot0_out)
+    ):
+        return RotateFix(base, "no_rot", None, None)
+    folded = ("matrix", "parent")
+    if (rsrc_in in folded and abs(rot_in) > ROTATE_AMBIGUOUS_DEG) or (
+        rsrc_out in folded and _finite(rot_out) and abs(rot_out) > ROTATE_AMBIGUOUS_DEG
+    ):
+        return RotateFix(base, "ambiguous", None, None)
+    if abs(moved) < ROTATE_MIN_MOVED_PX:
+        code = "no_move" if distance >= 2 * ROTATE_MIN_MOVED_PX else "none"
+        return RotateFix(base, code, None, None)
+    k = ((rot_in - _rest(rot0_in)) - ((rot_out - _rest(rot0_out)) if _finite(rot_out) else 0.0)) / moved
+    if not math.isfinite(k):
+        return RotateFix(base, "no_rot", None, None)
+    ratio = abs(k) / (360 / travel)
+    if not ROTATE_K_MIN_RATIO <= ratio <= ROTATE_K_MAX_RATIO:
+        return RotateFix(base, "implausible", None, k)
+    wanted = rotate_wanted(angle, sense if sense in SENSES else "direct")
+    target = int(min(max(round(wanted / abs(k)), 0), math.floor(travel)))
+    if abs(target - moved) < ROTATE_FIX_MIN_PX:
+        return RotateFix(base, "none", target, k)
+    return RotateFix(max(0, int(round(distance + (target - moved)))), "moved", target, k)
+
+
 def proportional_point(box: Mapping[str, float], px: float, py: float) -> tuple[float, float]:
     return (box["x"] + px * box["width"], box["y"] + py * box["height"])
 
@@ -103,6 +201,11 @@ def _wait(ms: int) -> dict[str, Any]:
 
 
 def drag_actions(start: tuple[float, float], offset: int, rng: random.Random) -> list[dict[str, Any]]:
+    return drag_actions_held(start, offset, rng) + finish_actions(start, None)
+
+
+def drag_actions_held(start: tuple[float, float], offset: int, rng: random.Random) -> list[dict[str, Any]]:
+    """The drag up to its final move and the 300 ms after it, button still down (s27, console ADR 061)."""
     sx, sy = float(start[0]), float(start[1])
     offset = max(0, int(offset))
     far = offset + DRAG_OVERSHOOT_PX
@@ -118,8 +221,15 @@ def drag_actions(start: tuple[float, float], offset: int, rng: random.Random) ->
     actions.append(_wait(200))
     actions.append(_move(sx + offset, sy))
     actions.append(_wait(300))
-    actions.append({"type": "up"})
     return actions
+
+
+def finish_actions(start: tuple[float, float], offset: int | None) -> list[dict[str, Any]]:
+    """End of a held drag: [up], or one correction move to `offset`, the same 300 ms, then up (s27, ADR 061)."""
+    if offset is None:
+        return [{"type": "up"}]
+    sx, sy = float(start[0]), float(start[1])
+    return [_move(sx + max(0, int(offset)), sy), _wait(300), {"type": "up"}]
 
 
 def request_worst_case_s(actions: Sequence[Mapping[str, Any]]) -> float:

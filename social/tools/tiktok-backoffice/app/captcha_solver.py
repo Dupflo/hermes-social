@@ -25,6 +25,13 @@ s25 (console ADR 059):
 - diagnostic: one entry per try in `CaptchaReport.diagnostics` (codes and numbers only, outside `to_json`),
   turned into lines by `diagnostic_lines` — printed by the jobs, never by this module.
 
+s27 : lecture tenue et auto-calibration du rotate v2, console ADR 061 (amends ADR 059 §2 and §5 for rotate v2
+only): the drag is played up to its final move with the button held (≤ 2 requests), the page is read ONCE with the
+button still held (geometry_js, HELD_PROBE_TIMEOUT_S, any error ⇒ no read), captcha_geometry.rotate_target decides
+at most one correction, and the final request (correction or not, then up) is always sent (try/finally). The
+measures go at the end of the diagnostic line; a not_gone try whose read gave a negative scale makes the next try
+aim at 360 − angle, and the one after back at the angle (alternation).
+
 Hygiene: nothing is printed, no exception message is kept (the SadCaptcha key travels in its URL). The page is
 never loaded again: the only control clicked between two tries is the captcha's own button (rotate v2).
 """
@@ -57,6 +64,8 @@ REFRESH_LOOKUP_S = 5.0
 GESTURE_SETTLE_S = 2.0
 SADCAPTCHA_TIMEOUT_S = 15.0  # SadCaptchaClient.timeout
 DRAG_MAX_REQUESTS = 3  # split_gesture(drag_actions(...)), tested in tests/test_captcha_geometry.py
+HELD_PROBE_TIMEOUT_S = 2.5  # s27 (console ADR 061): the rotate v2 read with the button held
+ROTATE_V2_MAX_REQUESTS = DRAG_MAX_REQUESTS  # ≤ 2 held requests + the final one (tests/test_captcha_geometry.py)
 PUZZLE_V2_STEP_PX = 2
 PUZZLE_V2_MAX_ITERATIONS = 200
 PUZZLE_V2_MAX_S = 45.0
@@ -83,6 +92,17 @@ DIAGNOSTIC_STEPS = (
     "unavailable",
 )
 CAPTCHA_BUTTON_STATES = ("clicked", "missing", "error")
+# s27 (console ADR 061): closed lists of the rotate v2 measures.
+PAIR_STATES = ("ok", "same")
+ROTATE_SOURCES = geo.ROTATE_SOURCES
+FIX_CODES = geo.FIX_CODES
+SENSES = geo.SENSES
+REST_STATES = geo.REST_STATES
+MEASURE_FIELDS = (
+    "bar", "handle", "track", "in_w", "in_nat", "out_w", "pair", "moved", "rot_in", "rot_out", "rsrc", "rsrc_out",
+    "k1000", "target", "fix", "sense",
+    "rot0_in", "rot0_out", "rot0",  # review m1: rotations read before the drag, appended last
+)
 
 # Injected by tests (P6 fallback); never given a cookie.
 _urlopen = urllib.request.urlopen
@@ -170,6 +190,7 @@ def _new_diagnostic(seq: int, number: int) -> dict[str, Any]:
         "http": None,
         "captcha_button": None,
         "ms": 0,
+        **{name: None for name in MEASURE_FIELDS},
     }
 
 
@@ -193,6 +214,7 @@ class _Solver:
         self.rng = rng
         self.deadline = deadline
         self.diag: dict[str, Any] = _new_diagnostic(0, 0)
+        self.sense = "direct"  # s27 (P4): aim of the next rotate v2 try, alternated after a not_gone
 
     # --- bounds --------------------------------------------------------------------------------------------------
 
@@ -209,7 +231,10 @@ class _Solver:
     def _answer_bound(self, variant: str) -> float:
         """Everything needed to play a SadCaptcha answer: rectangles, the whole gesture, the check."""
         kind, _ = geo.variant_parts(variant)
-        if kind == "rotate" or variant == "puzzle_v1":
+        if variant == "rotate_v2":
+            # s27 (console ADR 061): held requests + the final one, and the read with the button held in between.
+            gesture = self._gesture_bound(ROTATE_V2_MAX_REQUESTS) + HELD_PROBE_TIMEOUT_S
+        elif kind == "rotate" or variant == "puzzle_v1":
             gesture = self._gesture_bound(DRAG_MAX_REQUESTS)
         elif variant == "puzzle_v2":
             gesture = 0.0  # closed loop, bounded by PUZZLE_V2_MAX_S itself (unchanged)
@@ -273,7 +298,36 @@ class _Solver:
         for name in sel.rect_names(variant):
             if not geo.valid_box(rects.get(name)):
                 raise _Failed("rects")
+        if variant == "rotate_v2":
+            probe = value.get("probe") if isinstance(value.get("probe"), dict) else {}
+            self.diag.update(
+                bar=rects["bar"]["width"],
+                handle=rects["handle"]["width"],
+                track=_width(probe.get("track")),
+                in_w=_width(probe.get("inner")),
+                in_nat=probe.get("in_nat"),
+                out_w=_width(probe.get("outer")),
+                pair=probe.get("pair"),
+                rot0_in=probe.get("rot_in"),
+                rot0_out=probe.get("rot_out"),
+            )
         return rects
+
+    def held_probe(self) -> dict[str, Any] | None:
+        """Rotate v2, button held (s27, console ADR 061): one bounded read; None on any error or without a handle.
+
+        The client is called directly (not self.evaluate): an unreachable Camofox here is only a missing read, the
+        final request that follows decides whether the captcha stops.
+        """
+        try:
+            value = self.client.evaluate_value(self.tab, sel.geometry_js("rotate_v2"), timeout=HELD_PROBE_TIMEOUT_S)
+        except Exception:  # noqa: BLE001 - any failure of the read is `no_read`, never kept
+            return None
+        rects = value.get("rects") if isinstance(value, dict) else None
+        if not isinstance(rects, dict) or not geo.valid_box(rects.get("handle")):
+            return None
+        probe = value.get("probe")
+        return {"handle": rects["handle"], "probe": probe if isinstance(probe, dict) else {}}
 
     def translate_x(self, variant: str) -> int | None:
         value = self.evaluate(sel.geometry_js(variant), "gesture_error")
@@ -369,9 +423,85 @@ class _Solver:
         finally:
             self.release()
 
+    def _send(self, actions: list[dict[str, Any]], hold: bool) -> None:
+        self.diag["requests"] += 1
+        self.diag["moves"] += sum(1 for a in actions if a["type"] == "move")
+        self.mouse(actions, hold=hold)
+
+    def rotate_v2(self, angle: Any, rects: dict[str, Any]) -> None:
+        """Held drag to the estimate, one read with the button held, at most one correction, then the release."""
+        sense = self.sense
+        self.diag["sense"] = sense
+        bar, handle = rects["bar"]["width"], rects["handle"]["width"]
+        distance = geo.rotate_distance(bar, handle, geo.rotate_wanted(angle, sense))
+        self.diag["distance"] = distance
+        start = geo.drag_start(rects["handle"])
+        try:
+            chunks = geo.split_gesture(geo.drag_actions_held(start, distance, self.rng))
+        except ValueError:
+            raise _Failed("gesture_error") from None
+        self._need(self._gesture_bound(len(chunks) + 1) + HELD_PROBE_TIMEOUT_S)
+        began = self.clock()
+        try:
+            for chunk, hold in chunks:
+                self._send(chunk, hold)
+        except _Failed:
+            self.diag["gesture_ms"] += int((self.clock() - began) * 1000)
+            self.sleep(GESTURE_SETTLE_S)
+            self.release()
+            raise
+        # No _need, no pause, no other read until the final request (console ADR 059 §5, ADR 061).
+        final = geo.finish_actions(start, None)
+        try:
+            held = self.held_probe()
+            moved = held["handle"]["x"] - rects["handle"]["x"] if held is not None else None
+            probe = held["probe"] if held is not None else {}
+            rot0_in, rot0_out = self.diag.get("rot0_in"), self.diag.get("rot0_out")
+            self.diag.update(
+                moved=moved,
+                rot_in=probe.get("rot_in"),
+                rot_out=probe.get("rot_out"),
+                rsrc=probe.get("rsrc_in"),
+                rsrc_out=probe.get("rsrc_out"),
+                rot0=geo.rotate_rest_state(probe.get("rot_in"), probe.get("rot_out"), rot0_in, rot0_out),
+            )
+            fix = geo.rotate_target(
+                angle, bar - handle, distance, moved, probe.get("rot_in"), probe.get("rot_out"),
+                probe.get("rsrc_in"), probe.get("rsrc_out"), sense, rot0_in=rot0_in, rot0_out=rot0_out,
+            )
+            self.diag.update(
+                fix=fix.code,
+                target=fix.target,
+                k1000=round(fix.k * 1000) if fix.k is not None and math.isfinite(fix.k) else None,
+            )
+            if fix.code == "moved":
+                final = geo.finish_actions(start, fix.cursor)
+        finally:
+            try:
+                self._send(final, False)
+            except _Failed:
+                self.sleep(GESTURE_SETTLE_S)
+                self.release()
+                raise
+            finally:
+                self.diag["gesture_ms"] += int((self.clock() - began) * 1000)
+
+    def next_sense(self) -> None:
+        """After a rotate v2 try ended not_gone (s27, P4): alternate the aim, only on a negative observed scale."""
+        if self.diag.get("sense") == "complement":
+            self.sense = "direct"
+        elif (
+            self.diag.get("fix") in ("none", "moved")
+            and isinstance(self.diag.get("k1000"), int)
+            and self.diag["k1000"] < 0
+        ):
+            self.sense = "complement"
+
     def gesture(self, variant: str, answer: Any, rects: dict[str, Any]) -> None:
         kind, _ = geo.variant_parts(variant)
-        if kind == "rotate":
+        if variant == "rotate_v2":
+            self.rotate_v2(answer, rects)
+        elif kind == "rotate":
             distance = geo.rotate_distance(rects["bar"]["width"], rects["handle"]["width"], answer)
             self.diag["distance"] = distance
             self.play(geo.drag_actions(geo.drag_start(rects["handle"]), distance, self.rng))
@@ -453,6 +583,8 @@ class _Solver:
             rects = self.rects(variant)
             self.gesture(variant, answer, rects)
             if not self.captcha_gone():
+                if variant == "rotate_v2":
+                    self.next_sense()
                 raise _Failed("not_gone")
             diag["step"] = "solved"
             return variant, "solved"
@@ -470,6 +602,35 @@ def _count(value: Any) -> int:
         return 0
 
 
+def _width(box: Any) -> Any:
+    return box.get("width") if isinstance(box, dict) else None
+
+
+def _signed(value: Any) -> str:
+    """A finite number rounded to an integer (sign kept), or `-` (s27)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return "-"
+    return str(round(value))
+
+
+def _closed(value: Any, allowed: tuple[str, ...]) -> str:
+    return value if isinstance(value, str) and value in allowed else "-"
+
+
+def _measures(diag: dict[str, Any]) -> str:
+    """s27 (console ADR 061): the rotate v2 measures, `-` everywhere for another variant."""
+    if diag.get("variant") != "rotate_v2":
+        return "".join(f" {name}=-" for name in MEASURE_FIELDS)
+    closed = {
+        "pair": PAIR_STATES, "rsrc": ROTATE_SOURCES, "rsrc_out": ROTATE_SOURCES, "fix": FIX_CODES, "sense": SENSES,
+        "rot0": REST_STATES,
+    }
+    return "".join(
+        f" {name}={_closed(diag.get(name), closed[name]) if name in closed else _signed(diag.get(name))}"
+        for name in MEASURE_FIELDS
+    )
+
+
 def _code(value: Any) -> str:
     """An integer or `-`: never a free value on a diagnostic line."""
     if isinstance(value, bool) or not isinstance(value, int):
@@ -481,7 +642,8 @@ def diagnostic_lines(report: CaptchaReport) -> list[str]:
     """One line per try (console ADR 059, P5): closed lists and numbers only, no text, URL, image nor key.
 
     The `refresh=` field is the fate of the captcha's own button after the try (rotate v2). An entry whose step
-    is not in DIAGNOSTIC_STEPS is dropped.
+    is not in DIAGNOSTIC_STEPS is dropped. s27 (console ADR 061): the rotate v2 measures follow `ms=` (MEASURE_FIELDS,
+    numbers rounded to integers and closed lists, `-` otherwise and for every other variant).
     """
     lines = []
     for diag in report.diagnostics:
@@ -497,6 +659,7 @@ def diagnostic_lines(report: CaptchaReport) -> list[str]:
             f" angle={_code(diag.get('angle'))} distance={_code(diag.get('distance'))}"
             f" requests={_count(diag.get('requests'))} moves={_count(diag.get('moves'))}"
             f" gesture_ms={_count(diag.get('gesture_ms'))} http={http_code} refresh={button} ms={_count(diag.get('ms'))}"
+            + _measures(diag)
         )
     return lines
 

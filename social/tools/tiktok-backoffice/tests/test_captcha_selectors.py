@@ -105,3 +105,107 @@ def test_dom_modules_have_no_forbidden_call(module):
         assert banned not in source, banned
     # s25 : épingle amendée (rafraîchissement relu, console ADR 059): REFRESH_JS only reads a rectangle
     assert "refresh" not in source.replace("#captcha_refresh_button", "").replace("REFRESH_JS", "")
+
+
+# s27 (console ADR 061): geometry_js of every variant but rotate_v2, frozen at e47d7ae (before the held probe).
+GEOMETRY_JS_E47D7AE = {
+    'puzzle_v1': (
+        '(() => { const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibili'
+        "ty !== 'hidden'; const all = (s) => Array.from(document.querySelectorAll(s)); const first = (s) => a"
+        'll(s).find(vis) || null; const any = (s) => all(s).some(vis); const rect = (s) => { const el = first'
+        '(s); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.w'
+        'idth, height: r.height }; }; const out = { rects: { puzzle: rect("#captcha-verify-image"), handle: r'
+        'ect(".secsdk-captcha-drag-icon"), } }; return out; })()'
+    ),
+    'puzzle_v2': (
+        '(() => { const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibili'
+        "ty !== 'hidden'; const all = (s) => Array.from(document.querySelectorAll(s)); const first = (s) => a"
+        'll(s).find(vis) || null; const any = (s) => all(s).some(vis); const rect = (s) => { const el = first'
+        '(s); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.w'
+        'idth, height: r.height }; }; const out = { rects: { puzzle: rect("#captcha-verify-image"), handle: r'
+        'ect(".secsdk-captcha-drag-icon"), } }; const w = first(".captcha-verify-container div[draggable=true'
+        ']:has(img[draggable=false])") || document.querySelector(".captcha-verify-container div[draggable=tru'
+        'e]:has(img[draggable=false])"); const m = w ? /translateX\\((-?\\d+(?:\\.\\d+)?)/.exec(String(w.getAttri'
+        "bute('style') || '')) : null; out.translate_x = m ? Math.trunc(Number(m[1])) : null; return out; })("
+        ')'
+    ),
+    'rotate_v1': (
+        '(() => { const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibili'
+        "ty !== 'hidden'; const all = (s) => Array.from(document.querySelectorAll(s)); const first = (s) => a"
+        'll(s).find(vis) || null; const any = (s) => all(s).some(vis); const rect = (s) => { const el = first'
+        '(s); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.w'
+        'idth, height: r.height }; }; const out = { rects: { bar: rect(".captcha_verify_slide--slidebar"), ha'
+        'ndle: rect(".secsdk-captcha-drag-icon"), } }; return out; })()'
+    ),
+    'shapes_v1': (
+        '(() => { const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibili'
+        "ty !== 'hidden'; const all = (s) => Array.from(document.querySelectorAll(s)); const first = (s) => a"
+        'll(s).find(vis) || null; const any = (s) => all(s).some(vis); const rect = (s) => { const el = first'
+        '(s); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.w'
+        'idth, height: r.height }; }; const out = { rects: { image: rect("#captcha-verify-image"), } }; retur'
+        'n out; })()'
+    ),
+    'shapes_v2': (
+        '(() => { const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibili'
+        "ty !== 'hidden'; const all = (s) => Array.from(document.querySelectorAll(s)); const first = (s) => a"
+        'll(s).find(vis) || null; const any = (s) => all(s).some(vis); const rect = (s) => { const el = first'
+        '(s); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.w'
+        'idth, height: r.height }; }; const out = { rects: { image: rect(".captcha-verify-container div.cap-r'
+        'elative img"), } }; return out; })()'
+    ),
+    'icon_v1': (
+        '(() => { const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibili'
+        "ty !== 'hidden'; const all = (s) => Array.from(document.querySelectorAll(s)); const first = (s) => a"
+        'll(s).find(vis) || null; const any = (s) => all(s).some(vis); const rect = (s) => { const el = first'
+        '(s); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.w'
+        'idth, height: r.height }; }; const out = { rects: { image: rect("#captcha-verify-image"), } }; retur'
+        'n out; })()'
+    ),
+    'icon_v2': (
+        '(() => { const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibili'
+        "ty !== 'hidden'; const all = (s) => Array.from(document.querySelectorAll(s)); const first = (s) => a"
+        'll(s).find(vis) || null; const any = (s) => all(s).some(vis); const rect = (s) => { const el = first'
+        '(s); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.w'
+        'idth, height: r.height }; }; const out = { rects: { image: rect(".captcha-verify-container div.cap-r'
+        'elative img"), } }; return out; })()'
+    ),
+}
+
+PROBE_KEYS = ("track", "inner", "outer", "in_nat", "out_nat", "rot_in", "rot_out", "rsrc_in", "rsrc_out", "pair")
+
+
+def test_geometry_js_of_the_other_variants_is_unchanged():
+    # s27 (console ADR 061): the held probe is reserved to rotate v2; every other script is the e47d7ae one.
+    assert set(GEOMETRY_JS_E47D7AE) == set(geo.VARIANTS) - {"rotate_v2"}
+    for variant, script in GEOMETRY_JS_E47D7AE.items():
+        assert sel.geometry_js(variant) == script, variant
+
+
+def test_rotate_v2_geometry_carries_the_probe():
+    js = sel.geometry_js("rotate_v2")
+    assert "probe" in js
+    for key in PROBE_KEYS:
+        assert f" {key}:" in js, key
+    for needle in ("parentElement", "naturalWidth", "getComputedStyle", "atan2", "rotate\\(", "matrix"):  # rotate( in a regex
+        assert needle in js, needle
+    for value in ("'inline'", "'matrix'", "'parent'", "'none'", "'same'", "'ok'"):
+        assert value in js, value
+    # rects() still only needs bar and handle
+    assert " bar: rect(" in js and " handle: rect(" in js
+    assert sel.rect_names("rotate_v2") == ("bar", "handle")
+
+
+@pytest.mark.parametrize("variant", sorted(set(geo.VARIANTS) - {"rotate_v2"}))
+def test_the_probe_is_rotate_v2_only(variant):
+    js = sel.geometry_js(variant)
+    assert "probe" not in js
+    for key in ("rot_in", "rot_out", "rsrc_in", "rsrc_out", "in_nat", "out_nat", "pair", "track"):
+        assert key not in js, key
+
+
+def test_rotate_v2_probe_returns_numbers_and_codes_only():
+    js = sel.geometry_js("rotate_v2")
+    assert "translateX" not in js and "translate_x" not in js and "refresh" not in js
+    # the image sources are only compared, never returned
+    assert re.search(r"[{,]\s*(src|currentSrc)\s*[:,}]", js) is None
+    assert "currentSrc" in js
