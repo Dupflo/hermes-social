@@ -24,6 +24,13 @@ Outcomes (ADR 011 contract; the exit code wins over the CONSOLE_RESULT line, whi
 - exit 21 browser unavailable / page unusable, 22 captcha unsolved, 23 internal error (class name only) or SIGTERM,
   24 TikTok session lost, 25 invalid configuration (owner handle, hourly limit, --max-items).
 
+s30 (console ADR 064): the DM is opened by real clicks with a bounded wait for the editor and one more attempt
+(app/tiktok_reply_page.py); no « Message » button => the item is released with `page=no_dm_button`, no editor =>
+`page=no_dm_editor` (exit 21, nothing sent); a captcha on the profile goes through the same solver before anything is
+read there; nothing is typed when a bubble or the conversation already holds the DM; the send is verified by bounded
+reads, never replayed. Each item's DM path prints `dm_probe item=<id> step=<profile|thread|verify> <key>=<value>…`
+lines right after its `item` line (structure only, closed keys and values; never in CONSOLE_RESULT).
+
 Hygiene: the output holds numeric ids, counters and codes from closed lists only (OUTCOMES, ACTION_STATES). Never
 an author, a handle, a comment, DM or reply text, an URL, nor an exception message. The SadCaptcha key is read from
 the environment and never printed.
@@ -55,10 +62,10 @@ from app.tiktok_reply_page import (
     PageUnusable,
     SendUncertain,
     TikTokReplyPage,
-    dm_present,
-    dm_verified,
+    dm_already_there,
     find_target,
     owner_reply_present,
+    probe_line,
     reply_verified,
 )
 from app.tiktok_reply_page import SESSION_KEY  # noqa: F401 - part of the job contract
@@ -163,6 +170,8 @@ class ReplyResult:
     released_code: str | None = None
     started: bool = False  # the queue was read (the `start` line is printed)
     budget_at_start: int = 0
+    # s30 (console ADR 064, D1): `dm_probe` records per item id, printed after the item's line (stdout only)
+    dm_probes: dict[int, list[tuple[str, dict[str, Any]]]] = field(default_factory=dict)
 
 
 # --- legacy cron guard (P3) -----------------------------------------------------------------------------------------
@@ -206,6 +215,7 @@ class _Run:
         self.store, self.page, self.solve, self.clock, self.owner = store, page, solve, clock, owner
         self.report, self.counters = report, counters
         self.solver_used = 0.0
+        self.dm_probes: dict[int, list[tuple[str, dict[str, Any]]]] = {}
 
     # captcha (s22 solver, ADR 052/053)
 
@@ -303,15 +313,24 @@ class _Run:
                     entry["reply"] = "skipped"
 
                 if not dm_done:
+                    def captcha_gate(tab: str) -> bool:
+                        # s30 (console ADR 064): a captcha on the profile or the thread is solved before anything is
+                        # read or clicked there; True when one was met.
+                        met = len(self.report.captchas)
+                        if not self.captcha_cleared(tab, item_clock):
+                            raise _Stop("captcha_unsolved")
+                        return len(self.report.captchas) > met
+
                     try:
-                        dm_tab = self.page.open_dm(author)
+                        dm_tab = self.page.open_dm(author, captcha_gate=captcha_gate)
                     except DmUnavailable:
                         return finish("failed", "dm_unavailable", "dm_unavailable")
                     check_deadline()
                     if not self.captcha_cleared(dm_tab, item_clock):
                         raise _Stop("captcha_unsolved")
                     check_deadline()
-                    if dm_present(self.page.thread_snapshot(dm_tab), dm_text):
+                    # s30 (R1): a bubble OR the conversation column already holding the text => nothing typed
+                    if dm_already_there(self.page.thread_snapshot(dm_tab), dm_text):
                         entry["dm"] = "present"
                     else:
                         self.page.type_dm(dm_tab, dm_text)
@@ -328,7 +347,7 @@ class _Run:
                         acted()
                         error: str | None = None
                         try:
-                            verified = dm_verified(self.page.thread_snapshot(dm_tab), dm_text)
+                            verified = self.page.verify_dm(dm_tab, dm_text)  # s30 (A3): read again, never replayed
                         except (PageError, *_BROWSER_ERRORS):
                             verified, error = False, "browser_unavailable"
                         record("private_reply", dm_text, verified)
@@ -407,6 +426,11 @@ class _Run:
                 self.store.release_review_item(rid)
             raise
         finally:
+            # s30 (console ADR 064, D1): the `dm_probe` records of this item, printed after its `item` line (stdout
+            # only, never in CONSOLE_RESULT), kept for an item released by a _Stop too.
+            probe = self.page.take_dm_probe()
+            if probe:
+                self.dm_probes[rid] = list(probe)
             self.page.close_all()
 
 
@@ -512,7 +536,7 @@ def run_reply(
     counters["pending_after"] = int(store.review_status_counts().get("pending_review", 0))
     captcha_counters()
     return ReplyResult(status, reason, code, counters, items, error_class, released_code if code else None, True,
-                       budget_at_start)
+                       budget_at_start, dm_probes=run.dm_probes)
 
 
 # --- output ---------------------------------------------------------------------------------------------------------
@@ -530,6 +554,10 @@ def emit_lines(result: ReplyResult) -> list[str]:
     for i in result.items:
         page = f" page={i['page']}" if i.get("page") in PAGE_UNUSABLE_CODES else ""
         lines.append(f"item {i['id']}: outcome={i['outcome']} dm={i['dm']} reply={i['reply']}{page}")
+        for step, fields in result.dm_probes.get(i["id"]) or []:
+            line = probe_line(i["id"], step, fields)
+            if line is not None:
+                lines.append(line)
     if result.reason == "rate_limited" and c["deferred"]:
         lines.append(f"queue: deferred rate_limited n={c['deferred']}")
     if result.released_code is not None and c["items_released"]:

@@ -56,7 +56,8 @@ def test_login_gate_node_suite():
     # s26 : épingle amendée (le glob prend tests/js/reader_guard.test.mjs, 10 cas de plus, console ADR 060)
     # s28 : épingle amendée (le glob prend tests/js/panel_state.test.mjs, 13 cas de plus, console ADR 062)
     # s29 : épingle amendée (le glob prend tests/js/video_author.test.mjs, 8 cas de plus, console ADR 063)
-    assert "# pass 39" in result.stdout
+    # s30 : épingle amendée (le glob prend tests/js/dm_path.test.mjs, 26 cas de plus, console ADR 064)
+    assert "# pass 65" in result.stdout
 
 
 def test_reader_guard_is_a_one_line_definition_without_page_text():
@@ -106,3 +107,55 @@ def test_video_author_handles_never_queries_every_link_of_the_document():
                      '[data-e2e="video-desc"]', '[data-e2e="search-common-link"]'):
         assert excluded in line, excluded
     assert "decodeURIComponent" in line and "catch" in line
+
+
+# --- s30 (console ADR 064, D2-D4, A1, A2, A6, A8): the DM path helpers, in _DM_HELPERS only ---
+
+DM_HELPER_NAMES = ("shapeOf", "messageButton", "dmBlock", "dmEditor", "convColumn", "convText", "sendButton")
+
+
+def _dm_definition(name: str) -> str:
+    lines = [line for line in sel._DM_HELPERS.splitlines() if line.startswith(f" function {name}(")]
+    assert len(lines) == 1, name
+    return lines[0]
+
+
+def test_dm_helpers_are_one_line_definitions_outside_the_shared_helpers():
+    for name in DM_HELPER_NAMES:
+        line = _dm_definition(name)
+        assert line.rstrip().endswith("}"), name
+        assert f"function {name}(" not in sel._HELPERS, name
+    # every line of _DM_HELPERS is a definition (nothing else injected into the two DM scripts)
+    assert all(line.startswith(" function ") for line in sel._DM_HELPERS.splitlines() if line.strip())
+
+
+def test_message_button_excludes_the_navigation_and_never_reads_a_link():
+    line = _dm_definition("messageButton")
+    assert "#app-header,header,nav,[data-e2e*=\"nav\"]" in line
+    assert "href" not in line and "messages\\?" not in line and "messages?" not in line
+    assert "'[data-e2e=\"message-button\"],button,[role=\"button\"]'" in line
+
+
+def test_dm_helpers_only_read_the_page():
+    for forbidden in (".click(", "dispatchEvent", "focus(", "scrollIntoView", "innerHTML", "location.href"):
+        assert forbidden not in sel._DM_HELPERS, forbidden
+
+
+def test_dm_helpers_are_injected_into_the_two_dm_scripts_only():
+    from app import camofox_reader
+
+    for script in (sel.PROFILE_JS, sel.THREAD_JS):
+        assert sel._HELPERS in script and sel._DM_HELPERS in script
+    for other in (sel.comments_js("@SENTINEL_OWNER"), sel.PANEL_STATE_JS, sel.REPLY_EDITOR_JS,
+                  camofox_reader._COMMENT_EXTRACTION_JS, camofox_reader._READER_GUARD_JS):
+        for name in DM_HELPER_NAMES:
+            assert f"function {name}(" not in other, name
+
+
+def test_dm_scripts_only_read_the_page():
+    for script in (sel.PROFILE_JS, sel.THREAD_JS):
+        for forbidden in (".click(", "dispatchEvent", "focus(", "scrollIntoView", "innerHTML", "location.href"):
+            assert forbidden not in script, forbidden
+    # the profile script never accepts a link to the inbox: the button comes from messageButton() only
+    assert "messages\\?" not in sel.PROFILE_JS and "messages?" not in sel.PROFILE_JS
+    assert "message_button:mb.el?handle(mb.el):null" in sel.PROFILE_JS
