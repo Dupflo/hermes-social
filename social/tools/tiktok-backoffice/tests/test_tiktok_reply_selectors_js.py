@@ -49,4 +49,15 @@ def test_login_gate_node_suite():
         timeout=120,
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
-    assert "# pass 8" in result.stdout
+    # s26 : épingle amendée (le glob prend tests/js/reader_guard.test.mjs, 10 cas de plus, console ADR 060)
+    assert "# pass 18" in result.stdout
+
+
+def test_reader_guard_is_a_one_line_definition_without_page_text():
+    source = (ROOT / "app" / "camofox_reader.py").read_text(encoding="utf-8")
+    lines = [line for line in source.splitlines() if line.startswith(" function readerGuard(")]
+    assert len(lines) == 1
+    line = lines[0]
+    assert line.rstrip().endswith("}")
+    assert "document.body" not in line and "innerText" not in line
+    assert "loginGate()" in line

@@ -108,12 +108,78 @@ def test_fetch_comments_camofox_cli_reports_fetch_errors(tmp_path, monkeypatch):
 
 
 def test_camofox_logged_in_detection_rejects_log_in_to_comment():
+    # s26 : épingle amendée (garde structurelle readerGuard/loginGate au lieu d'une regex du corps, console ADR 060)
+    # — l'intention (« Log in to comment » n'est pas connecté) passe à tests/js/reader_guard.test.mjs.
     from app.camofox_reader import _COMMENT_EXTRACTION_JS
 
-    assert "Log\\s*in" in _COMMENT_EXTRACTION_JS
-    assert "to\\s+comment" in _COMMENT_EXTRACTION_JS
-    assert "Sign\\s*up" in _COMMENT_EXTRACTION_JS
     assert "logged_in" in _COMMENT_EXTRACTION_JS
+    assert "loginGate()" in _COMMENT_EXTRACTION_JS
+    assert "Log\\s*in" not in _COMMENT_EXTRACTION_JS
+    assert "to\\s+comment" not in _COMMENT_EXTRACTION_JS
+    assert "Sign\\s*up" not in _COMMENT_EXTRACTION_JS
+    assert "text.includes('Messages')" not in _COMMENT_EXTRACTION_JS
+
+
+def test_reader_guard_js_is_passive():
+    from app.camofox_reader import _READER_GUARD_JS
+
+    for forbidden in ("click(", "dispatchEvent", "scrollIntoView", "location", "reload", "navigate"):
+        assert forbidden not in _READER_GUARD_JS, forbidden
+
+
+def test_reader_guard_js_reuses_the_login_gate_of_the_reply_selectors():
+    from app import tiktok_reply_selectors as sel
+    from app.camofox_reader import _READER_GUARD_JS
+
+    gate = [line for line in sel._HELPERS.splitlines() if line.startswith(" function loginGate(")]
+    assert len(gate) == 1
+    assert gate[0] in _READER_GUARD_JS.splitlines()
+    assert "return readerGuard()" in _READER_GUARD_JS
+
+
+def test_extraction_logged_in_comes_from_the_reader_guard():
+    from app.camofox_reader import _COMMENT_EXTRACTION_JS
+
+    assert "logged_in: g.state === 'ok'" in _COMMENT_EXTRACTION_JS
+    assert "login_gate: g.login_gate" in _COMMENT_EXTRACTION_JS
+    assert "reader_guard: g" in _COMMENT_EXTRACTION_JS
+    # the nested IIFE keeps its own helpers: no second top-level `clean` of the extraction scope
+    assert _COMMENT_EXTRACTION_JS.count("function clean(s) {") == 1
+
+
+def test_coherence_login_gate_comes_from_the_dom_flag_not_a_body_regex():
+    from app.camofox_reader import _target_video_coherence
+
+    url = "https://www.tiktok.com/@dupflodev/video/123"
+    dom = {"url": url, "logged_in": False, "login_gate": False, "body_preview": "Log in"}
+    assert _target_video_coherence(url, dom, [])["login_gate"] is False
+    dom = {"url": url, "logged_in": False, "login_gate": True, "body_preview": ""}
+    assert _target_video_coherence(url, dom, [])["login_gate"] is True
+
+
+def _js_selector_list(literal: str) -> list[str]:
+    import re
+
+    return re.findall(r"'([^']+)'", literal)
+
+
+def test_reader_guard_items_are_exactly_the_extraction_containers():
+    import re
+
+    from app.camofox_reader import _COMMENT_EXTRACTION_JS, _READER_GUARD_FN
+
+    block = re.search(r"const containerSelector = \[(.*?)\]\.join", _COMMENT_EXTRACTION_JS, re.S)
+    assert block
+    extraction = _js_selector_list(block.group(1))
+    items = re.search(r"const itemSel='([^']+)'", _READER_GUARD_FN)
+    assert items
+    assert items.group(1).split(",") == extraction
+
+
+def test_reader_guard_states_closed_list():
+    from app.camofox_reader import READER_GUARD_STATES
+
+    assert READER_GUARD_STATES == ("ok", "login_gate", "no_signal")
 
 
 

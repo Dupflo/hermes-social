@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Mapping
 
 from app.captcha_selectors import PRESENT_JS
+from app.tiktok_reply_selectors import _HELPERS
 
 
 DEFAULT_CAMOFOX_BASE_URL = "http://camofox:9377"
@@ -216,6 +217,10 @@ class CamofoxUnreachable(CamofoxError):
         super().__init__("camofox unreachable")
 
 
+class CamofoxTimeout(CamofoxUnreachable):
+    """s26 (console ADR 060, P2): the request timed out. Still a CamofoxUnreachable for every existing handler."""
+
+
 @dataclass(frozen=True)
 class CamofoxClient:
     base_url: str = DEFAULT_CAMOFOX_BASE_URL
@@ -257,7 +262,13 @@ class CamofoxClient:
             status = exc.code
             exc.close()
             raise CamofoxHTTPError(status) from None
-        except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError):
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                raise CamofoxTimeout() from None
+            raise CamofoxUnreachable() from None
+        except (TimeoutError, socket.timeout):
+            raise CamofoxTimeout() from None
+        except ConnectionError:
             raise CamofoxUnreachable() from None
 
     def health(self, *, timeout: float | None = None) -> dict[str, Any]:
@@ -270,7 +281,8 @@ class CamofoxClient:
         if not isinstance(tabs, list):
             raise ValueError("unexpected tabs payload")
         return [
-            {"tabId": str(tab.get("tabId")), "url": str(tab.get("url") or "")}
+            # s26 (console ADR 060, D7): listItemId = the sessionKey of POST /tabs, used to close orphan tabs.
+            {"tabId": str(tab.get("tabId")), "url": str(tab.get("url") or ""), "listItemId": str(tab.get("listItemId") or "")}
             for tab in tabs
             if isinstance(tab, dict) and tab.get("tabId")
         ]
@@ -493,9 +505,31 @@ _ACTIVATE_COMMENTS_TAB_JS = r'''
 
 
 
+# s26 (console ADR 060, D1/P1): structural guard of the reader, a passive snapshot (no click, no event, no
+# navigation). Negative signal = loginGate() of tiktok_reply_selectors (same JS, imported). Positive « readable page »
+# signal = visible comment items (the very containers of the extraction below, the ones that read the comments in
+# production until 2026-10-13) or a visible comments panel (fallback selectors, not attested). The comment icon is
+# informative only (it exists logged out too): it says the page is ready for the activation, never « logged in ».
+# One single line starting with " function readerGuard(" (source contract of tests/js/reader_guard.test.mjs).
+READER_GUARD_STATES = ("ok", "login_gate", "no_signal")
+
+# s26 (console ADR 060, D2/P2): active wait, bounded by a monotonic clock budget, polled every GUARD_POLL_S.
+GUARD_POLL_S = 1.0
+GUARD_PAGE_WAIT_S = 20.0
+GUARD_PANEL_WAIT_S = 8.0
+GUARD_EVAL_TIMEOUT_S = 10.0
+
+_READER_GUARD_FN = r"""
+ function readerGuard(){const itemSel='[class*="DivCommentItemWrapper"],[class*="CommentItem"],[class*="CommentObject"],[data-e2e*="comment-item"],[data-e2e*="comment-level"]'; const items=Array.from(document.querySelectorAll(itemSel)).filter(el=>vis(el)&&!el.closest('#app-header, [data-e2e="inbox-notifications"]')).length; const panel=Array.from(document.querySelectorAll('[class*="DivCommentListContainer"],[class*="DivCommentContainer"],[class*="DivCommentInputWrapper"],[data-e2e="comment-input"]')).some(vis); const icon=Array.from(document.querySelectorAll('[data-e2e="comment-icon"]')).some(vis)||Array.from(document.querySelectorAll('[aria-label]')).some(el=>vis(el)&&/Read or add comments|comments?/i.test(el.getAttribute('aria-label')||'')); const gate=loginGate(); const state=gate?'login_gate':((items>0||panel)?'ok':'no_signal'); return {state:state,login_gate:gate,items:items,panel:panel,icon:icon}}
+"""
+
+_READER_GUARD_JS = "(() => {" + _HELPERS + _READER_GUARD_FN + " return readerGuard();})()"
+
+
 _COMMENT_EXTRACTION_JS = r'''
 (() => {
   const text = document.body.innerText || '';
+  const g = (() => {''' + _HELPERS + _READER_GUARD_FN + r''' return readerGuard();})();
   const badTexts = new Set(['Search','For You','Explore','Following','Friends','LIVE','Messages','Activity','Upload','Profile','More','Comments','Share','You may like','See translation']);
   function clean(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
   function authorFrom(el) {
@@ -595,7 +629,9 @@ _COMMENT_EXTRACTION_JS = r'''
   return {
     url: location.href,
     title: document.title,
-    logged_in: text.includes('Messages') && !/\b(Log\s*in(?:\s+to\s+comment)?|Sign\s*up)\b/i.test(text),
+    logged_in: g.state === 'ok',
+    login_gate: g.login_gate,
+    reader_guard: g,
     captcha: /captcha|verify|slider|puzzle/i.test(text),
     comments_index: text.indexOf('Comments'),
     related_tab_active: relatedTabActive,
@@ -672,7 +708,8 @@ def _target_video_coherence(video_url: str, dom_result: dict[str, Any], comments
         and any(author_token in str(item.get("author") or "").lower().lstrip("@") for item in comments)
     )
     logged_in = bool(dom_result.get("logged_in"))
-    login_gate = (dom_result.get("logged_in") is False) and bool(re.search(r"\b(Log\s*in|Sign\s*up)\b", str(dom_result.get("body_preview") or ""), re.IGNORECASE))
+    # s26 (console ADR 060, P1): the structural loginGate() flag of the extraction, never a body regex (diagnostic only).
+    login_gate = dom_result.get("login_gate") is True
 
     # Logged-out gates are handled separately: they are not a cross-video hazard,
     # but they are still non-actionable. A different loaded /video/ URL is always
@@ -705,6 +742,81 @@ def _reload_target_video_expression(video_url: str, attempt: int) -> str:
     return f"location.replace({url} + ({url}.includes('?') ? '&' : '?') + '_hermes_reload={attempt}_' + Date.now()); true"
 
 
+_NO_SIGNAL = {"state": "no_signal", "login_gate": False, "items": 0, "panel": False, "icon": False}
+
+
+def _guard_snapshot(raw: Any) -> dict[str, Any]:
+    """Normalise a readerGuard() result; an unknown state (or no result) is `no_signal`."""
+    if not isinstance(raw, dict):
+        return dict(_NO_SIGNAL)
+    state = raw.get("state")
+    items = raw.get("items")
+    return {
+        "state": state if state in READER_GUARD_STATES else "no_signal",
+        "login_gate": raw.get("login_gate") is True,
+        "items": items if type(items) is int and items > 0 else 0,
+        "panel": raw.get("panel") is True,
+        "icon": raw.get("icon") is True,
+    }
+
+
+def _page_ready(g: dict[str, Any]) -> bool:
+    # Ready for the activation. loginGate() never stops the wait early (D2).
+    return bool(g["icon"] or g["items"] > 0 or g["panel"])
+
+
+def _page_readable(g: dict[str, Any]) -> bool:
+    return g["state"] == "ok"
+
+
+def _await_guard(
+    client: Any,
+    tab_id: str,
+    *,
+    budget_s: float,
+    until: Callable[[dict[str, Any]], bool],
+    kind: str,
+    pause: Callable[[float], None],
+    expired: Callable[[], bool] | None,
+    clock: Callable[[], float],
+    trace: dict[str, Any],
+) -> dict[str, Any] | None:
+    """s26 (console ADR 060, P2): poll readerGuard() until `until(g)` or the budget is spent.
+
+    `expired()` true => None (the caller returns `video_timeout`). A poll in timeout counts `no_signal` for that
+    poll; any other client error goes up as before. `kind` (page / panel) is a label only.
+    """
+    del kind
+    start = clock()
+    snapshot: dict[str, Any] | None = None
+    while True:
+        if expired is not None and expired():
+            return None
+        if snapshot is not None and clock() - start >= budget_s:
+            return snapshot
+        try:
+            raw = client.evaluate(tab_id=tab_id, expression=_READER_GUARD_JS, timeout=GUARD_EVAL_TIMEOUT_S)
+        except CamofoxTimeout:
+            raw = None
+        snapshot = _guard_snapshot(raw)
+        trace["polled"] = True
+        trace["last_state"] = snapshot["state"]
+        if until(snapshot):
+            return snapshot
+        pause(GUARD_POLL_S)
+
+
+def _guard_code(trace: dict[str, Any], result: dict[str, Any]) -> str:
+    """s26 (console ADR 060, P4): closed list ok | ok_retry | captcha_late | login_gate | no_signal."""
+    if trace["captcha_late"]:
+        return "captcha_late"
+    ok = "ok_retry" if trace["retried"] else "ok"
+    if result.get("error") != "tiktok_page_not_actionable" and trace["final_readable"]:
+        return ok
+    state = trace["last_state"] or "no_signal"
+    return ok if state == "ok" else state
+
+
 def fetch_comments_from_camofox(
     *,
     video_url: str,
@@ -717,15 +829,22 @@ def fetch_comments_from_camofox(
     expired: Callable[[], bool] | None = None,
     close_tab: bool = False,
     sleep: Callable[[float], None] | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> dict[str, Any]:
     """Read the visible comments of one video.
 
-    s23 (console ADR 054, P3): the keyword options are additive. With their defaults the behaviour is the CLI /
-    legacy cron one (no captcha probe, tab left open, text-regex captcha flag). With `on_captcha`, the captcha
-    selectors (`captcha_selectors.PRESENT_JS`) are probed at the start of every attempt and before every reload; a
-    captcha goes to `on_captcha(tab_id)` in the current tab (True => go on without that reload, False =>
-    `captcha_unsolved`). `expired()` true => `video_timeout`. `close_tab` deletes the tab at the end, errors
-    swallowed. `client` given => `base_url`/`user_id` ignored.
+    s23 (console ADR 054, P3): the keyword options are additive. With `on_captcha`, the captcha selectors
+    (`captcha_selectors.PRESENT_JS`) are probed at the start of every attempt and before every reload; a captcha goes
+    to `on_captcha(tab_id)` in the current tab (True => go on without that reload, False => `captcha_unsolved`).
+    `expired()` true => `video_timeout`. `close_tab` deletes the tab at the end, errors swallowed. `client` given =>
+    `base_url`/`user_id` ignored. Without `on_captcha`: no selector probe, text-regex captcha flag.
+
+    s26 (console ADR 060, partly replaces ADR 054 P3): the guard is shared by the console scan and the CLI / legacy
+    cron path. A structural guard (`readerGuard()` + `loginGate()`) is polled with a bounded active wait (page, then
+    comments panel, monotonic `clock`, default `time.monotonic`) instead of fixed pauses; a negative page (logged-in
+    signal missing, no comment) is retried once in the same tab, without any reload, the captcha probe first (scan
+    mode), and probed one last time before `tiktok_page_not_actionable` (scan mode). `wait_seconds` only paces the
+    pause after a re-navigation. The result carries `guard` (closed list) as soon as one guard poll took place.
     """
     if client is None:
         # s20: defaults come from the environment (CAMOFOX_URL, CAMOFOX_USER_ID, CAMOFOX_API_KEY);
@@ -736,8 +855,11 @@ def fetch_comments_from_camofox(
         if user_id:
             client = replace(client, user_id=user_id)
     tab: dict[str, str | None] = {"id": None}
+    trace: dict[str, Any] = {
+        "polled": False, "last_state": None, "retried": False, "captcha_late": False, "final_readable": False,
+    }
     try:
-        return _fetch_comments_in_tab(
+        result = _fetch_comments_in_tab(
             client,
             tab,
             video_url=video_url,
@@ -747,7 +869,12 @@ def fetch_comments_from_camofox(
             expired=expired,
             # Resolved at call time, so monkeypatching camofox_reader.time.sleep keeps working.
             pause=sleep if sleep is not None else time.sleep,
+            clock=clock if clock is not None else time.monotonic,
+            trace=trace,
         )
+        if trace["polled"]:
+            result["guard"] = _guard_code(trace, result)
+        return result
     finally:
         if close_tab and tab["id"] is not None:
             try:
@@ -766,13 +893,17 @@ def _fetch_comments_in_tab(
     on_captcha: Callable[[str], bool] | None,
     expired: Callable[[], bool] | None,
     pause: Callable[[float], None],
+    clock: Callable[[], float],
+    trace: dict[str, Any],
 ) -> dict[str, Any]:
     activation_result: Any = None
-    activation_errors: list[str] = []
     dom_result: dict[str, Any] | None = None
     comments: list[dict[str, str]] = []
     coherence: dict[str, Any] | None = None
     captcha_present = False  # last PRESENT_JS probe (scan mode only)
+    tab_id = ""
+    timeout_result = {"ok": False, "error": "video_timeout", "comments": []}
+    unsolved_result = {"ok": False, "error": "captcha_unsolved", "comments": []}
 
     def captcha_in_the_way(tab_id: str) -> bool | None:
         """Scan mode: probe the selectors; None = no captcha, True = solved, False = unsolved."""
@@ -780,49 +911,109 @@ def _fetch_comments_in_tab(
         captcha_present = client.evaluate(tab_id=tab_id, expression=PRESENT_JS) is True
         if not captcha_present:
             return None
+        if trace["retried"]:
+            trace["captcha_late"] = True  # seen by a probe of the retry (or the final probe), P4
         solved = bool(on_captcha(tab_id))
         captcha_present = not solved
         return solved
 
+    def wait_guard(budget_s: float, until: Callable[[dict[str, Any]], bool], kind: str) -> dict[str, Any] | None:
+        return _await_guard(
+            client, tab_id, budget_s=budget_s, until=until, kind=kind, pause=pause, expired=expired, clock=clock,
+            trace=trace,
+        )
+
+    def activate() -> Any:
+        # Generic text selectors are unsafe on TikTok: they can select the
+        # adjacent/right-rail recommendation tab ("You may like") while still
+        # reporting a successful "Comments" click. Use the DOM-scoped activator
+        # only: comment icon first, then the visible Comments tab in the right panel.
+        result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
+        if isinstance(result, dict):
+            result["fallback"] = "js_click_scoped_comments_panel"
+            result["click_errors"] = []
+        return result
+
+    def read_round(*, head_probe: bool) -> dict[str, Any] | None:
+        """One reading round in the current tab; a dict = early stop, None = extraction done."""
+        nonlocal activation_result, dom_result, comments, coherence
+        if expired is not None and expired():
+            return timeout_result
+        if head_probe and on_captcha is not None and captcha_in_the_way(tab_id) is False:
+            return unsolved_result
+        # s26 (P2.2): wait for the page to be ready for the activation (replaces the fixed pause).
+        if wait_guard(GUARD_PAGE_WAIT_S, _page_ready, "page") is None:
+            return timeout_result
+        activation_result = activate()
+        # s26 (P2.4): wait for a readable panel (replaces the fixed 2 s pause); one re-activation at mid-budget,
+        # only when the first activation clicked nothing (click fallen before the hydration).
+        pause(GUARD_POLL_S)
+        started = clock()
+        g = wait_guard(GUARD_PANEL_WAIT_S / 2, _page_readable, "panel")
+        if g is None:
+            return timeout_result
+        if not _page_readable(g):
+            clicked = isinstance(activation_result, dict) and bool(activation_result.get("clicked"))
+            if not clicked and not g["items"] and not g["panel"]:
+                activation_result = activate()
+            remaining = max(0.0, GUARD_PANEL_WAIT_S - (clock() - started))
+            if wait_guard(remaining, _page_readable, "panel") is None:
+                return timeout_result
+        raw_dom_result = client.evaluate(tab_id=tab_id, expression=_COMMENT_EXTRACTION_JS)
+        if not isinstance(raw_dom_result, dict):
+            return {"ok": False, "error": "unexpected_camofox_result", "comments": []}
+        dom_result = raw_dom_result
+        comments = extract_comments_from_dom_result(dom_result)
+        coherence = _target_video_coherence(video_url, dom_result, comments)
+        trace["final_readable"] = dom_result.get("logged_in") is True or bool(comments)
+        return None
+
+    def not_actionable() -> bool:
+        return bool(
+            dom_result is not None and coherence and coherence.get("coherent")
+            and dom_result.get("logged_in") is False and not comments
+        )
+
     try:
         tab_id = client.create_tab(session_key=session_key, url=video_url)
         tab["id"] = tab_id
-        if wait_seconds > 0:
-            pause(wait_seconds)
-        for attempt in range(3):
-            if expired is not None and expired():
-                return {"ok": False, "error": "video_timeout", "comments": []}
-            if on_captcha is not None and captcha_in_the_way(tab_id) is False:
-                return {"ok": False, "error": "captcha_unsolved", "comments": []}
-            activation_errors = []
-            # Generic text selectors are unsafe on TikTok: they can select the
-            # adjacent/right-rail recommendation tab ("You may like") while still
-            # reporting a successful "Comments" click. Use the DOM-scoped activator
-            # only: comment icon first, then the visible Comments tab in the right panel.
-            activation_result = client.evaluate(tab_id=tab_id, expression=_ACTIVATE_COMMENTS_TAB_JS)
-            if isinstance(activation_result, dict):
-                activation_result["fallback"] = "js_click_scoped_comments_panel"
-                activation_result["click_errors"] = activation_errors
-            pause(2.0)
-            raw_dom_result = client.evaluate(tab_id=tab_id, expression=_COMMENT_EXTRACTION_JS)
-            if not isinstance(raw_dom_result, dict):
-                return {"ok": False, "error": "unexpected_camofox_result", "comments": []}
-            dom_result = raw_dom_result
-            comments = extract_comments_from_dom_result(dom_result)
-            coherence = _target_video_coherence(video_url, dom_result, comments)
+        attempt = 0
+        while True:
+            stop = read_round(head_probe=True)
+            if stop is not None:
+                return stop
             if coherence.get("coherent"):
+                # s26 (D3/P3): one retry, same tab, no reload; it does not use one of the 3 coherence rounds.
+                if not_actionable() and not trace["retried"]:
+                    trace["retried"] = True
+                    continue
                 break
-            if attempt < 2:
-                if expired is not None and expired():
-                    return {"ok": False, "error": "video_timeout", "comments": []}
-                if on_captcha is not None:
-                    solved = captcha_in_the_way(tab_id)
-                    if solved is False:
-                        return {"ok": False, "error": "captcha_unsolved", "comments": []}
-                    if solved is True:
-                        continue  # never reload a page that just had a captcha: go on in the same tab
-                client.evaluate(tab_id=tab_id, expression=_reload_target_video_expression(video_url, attempt + 1))
-                pause(max(wait_seconds, 6.0))
+            if attempt >= 2:
+                break
+            if expired is not None and expired():
+                return timeout_result
+            if on_captcha is not None:
+                solved = captcha_in_the_way(tab_id)
+                if solved is False:
+                    return unsolved_result
+                if solved is True:
+                    attempt += 1
+                    continue  # never reload a page that just had a captcha: go on in the same tab
+            client.evaluate(tab_id=tab_id, expression=_reload_target_video_expression(video_url, attempt + 1))
+            pause(max(wait_seconds, 6.0))
+            attempt += 1
+        # s26 (P3): scan mode, a last captcha probe right before `tiktok_page_not_actionable`; a captcha seen goes
+        # to the solver (never session_lost), then one last reading round in the same tab (no reload, no retry).
+        if on_captcha is not None and not_actionable():
+            solved = captcha_in_the_way(tab_id)
+            if solved is not None:
+                trace["captcha_late"] = True
+            if solved is False:
+                return unsolved_result
+            if solved is True:
+                stop = read_round(head_probe=False)
+                if stop is not None:
+                    return stop
     except (urllib.error.URLError, CamofoxUnreachable, CamofoxHTTPError) as exc:
         return {"ok": False, "error": "camofox_unreachable", "detail": str(exc), "comments": []}
     except Exception as exc:

@@ -179,6 +179,7 @@ def run(argv: list[str] | None = None) -> str:
             user_id=args.user_id,
             session_key=args.session_key,
             wait_seconds=args.wait_seconds,
+            close_tab=True,
         )
         comments = result.get("comments", [])
         if not result.get("ok"):

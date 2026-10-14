@@ -17,6 +17,7 @@ from app.camofox_reader import (
     DEFAULT_CAMOFOX_USER_ID,
     CamofoxClient,
     CamofoxHTTPError,
+    CamofoxTimeout,
     CamofoxUnreachable,
 )
 
@@ -123,7 +124,8 @@ def test_list_tabs_sends_user_id_in_query(server):
         {"running": True, "tabs": [{"tabId": "t1", "url": "https://www.tiktok.com/", "title": "x", "listItemId": "l"}]},
     )
     tabs = CamofoxClient(base_url=base, user_id="hermes_u").list_tabs()
-    assert tabs == [{"tabId": "t1", "url": "https://www.tiktok.com/"}]
+    # s26 : épingle amendée (`listItemId` gardé pour la fermeture des orphelins, console ADR 060)
+    assert tabs == [{"tabId": "t1", "url": "https://www.tiktok.com/", "listItemId": "l"}]
     assert recorder.requests[0]["query"] == {"userId": ["hermes_u"]}
 
 
@@ -213,8 +215,62 @@ def test_cli_fetch_defaults_come_from_env(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "fetch_comments_from_camofox", fake_fetch)
     cli.run(["--db", str(tmp_path / "t.sqlite3"), "fetch-comments-camofox", "--video-url", "https://www.tiktok.com/@a/video/1"])
     assert seen["base_url"] is None and seen["user_id"] is None
+    assert seen["close_tab"] is True  # s26 (console ADR 060, D6): the CLI / legacy cron path closes its tab
     cli.run(["--db", str(tmp_path / "t.sqlite3"), "fetch-comments-camofox", "--video-url", "https://www.tiktok.com/@a/video/1", "--base-url", "http://b:1", "--user-id", "hermes_b"])
     assert seen["base_url"] == "http://b:1" and seen["user_id"] == "hermes_b"
+
+
+# --- s26 (console ADR 060, D6): the CLI path closes its tab, success or failure (AC3) ---
+
+CLI_VIDEO = "https://www.tiktok.com/@dupflodev/video/7657941429938949399"
+# The fake server answers one response per path: the same dict serves as guard snapshot, activation result and
+# extraction result.
+CLI_PAGE = {
+    "state": "ok", "items": 1, "panel": True, "icon": True, "login_gate": False, "clicked": True,
+    "url": CLI_VIDEO, "title": "Proxy | TikTok", "logged_in": True, "captcha": False,
+    "body_preview": "dupflodev · Commente PROXY", "active_right_panel_preview": "",
+    "comment_nodes": [{"author": "@alice", "text": "proxy stp", "comment_id": "c1"}],
+}
+
+
+def _cli_fetch(monkeypatch, tmp_path, base):
+    from app import camofox_reader, cli
+
+    monkeypatch.setattr(camofox_reader.time, "sleep", lambda _s: None)
+    monkeypatch.delenv("CAMOFOX_API_KEY", raising=False)
+    return json.loads(cli.run([
+        "--db", str(tmp_path / "t.sqlite3"), "fetch-comments-camofox", "--video-url", CLI_VIDEO,
+        "--base-url", base, "--user-id", "hermes_u",
+    ]))
+
+
+def _deletes(recorder):
+    return [r for r in recorder.requests if r["method"] == "DELETE"]
+
+
+def test_cli_fetch_success_closes_its_tab(server, monkeypatch, tmp_path):
+    recorder, base = server
+    recorder.responses[("POST", "/tabs")] = (200, {"tabId": "t-cli"})
+    recorder.responses[("POST", "/tabs/t-cli/evaluate")] = (200, {"ok": True, "result": CLI_PAGE})
+
+    result = _cli_fetch(monkeypatch, tmp_path, base)
+
+    assert result["ok"] is True and result["fetched"] == 1
+    deletes = _deletes(recorder)
+    assert [(d["path"], d["query"]) for d in deletes] == [("/tabs/t-cli", {"userId": ["hermes_u"]})]
+    assert recorder.requests[-1]["method"] == "DELETE"
+
+
+def test_cli_fetch_failure_closes_its_tab_too(server, monkeypatch, tmp_path):
+    recorder, base = server
+    recorder.responses[("POST", "/tabs")] = (200, {"tabId": "t-cli"})
+    recorder.responses[("POST", "/tabs/t-cli/evaluate")] = (500, {"error": "boom"})
+
+    result = _cli_fetch(monkeypatch, tmp_path, base)
+
+    assert result["ok"] is False and result["error"] == "camofox_unreachable"
+    deletes = _deletes(recorder)
+    assert [(d["path"], d["query"]) for d in deletes] == [("/tabs/t-cli", {"userId": ["hermes_u"]})]
 
 
 # --- s21: login methods (navigate, keyboard typing, press, typed click/evaluate, binary screenshot) ---
@@ -266,6 +322,25 @@ def test_navigate_slower_than_timeout_is_unreachable(server):
     recorder.delays[("POST", "/tabs/t/navigate")] = 1.0
     with pytest.raises(CamofoxUnreachable):
         CamofoxClient(base_url=base).navigate("t", "https://www.tiktok.com/login", timeout=0.2)
+
+
+def test_a_timeout_is_a_typed_camofox_timeout(server):
+    # s26 (console ADR 060, P2): a poll in timeout is told apart from a refused connection.
+    recorder, base = server
+    recorder.delays[("POST", "/tabs/t/evaluate")] = 1.0
+    with pytest.raises(CamofoxTimeout) as info:
+        CamofoxClient(base_url=base).evaluate(tab_id="t", expression="1", timeout=0.2)
+    assert isinstance(info.value, CamofoxUnreachable)
+
+
+def test_connection_refused_is_unreachable_but_not_a_timeout():
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    with pytest.raises(CamofoxUnreachable) as info:
+        CamofoxClient(base_url=f"http://127.0.0.1:{port}").health()
+    assert not isinstance(info.value, CamofoxTimeout)
 
 
 def test_press_body(server):

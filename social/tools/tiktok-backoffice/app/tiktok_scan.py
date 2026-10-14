@@ -59,6 +59,11 @@ LEGACY_JOBS_JSON = "/opt/data/cron/jobs.json"
 # PRESENT_JS probe (30 s) + delete_tab (10 s) = ~382 s, plus the run's 240 s of solver = ~622 s, bounded by
 # 240 + 240 + 220 = 700 s. s25 (console ADR 059, s23 n1): the solver hands back by its deadline (every step only
 # starts with its own bound left), so there is no solver overrun term any more; 700 s is kept as the margin.
+# s26 (console ADR 060, P5): the reader's fixed pauses became guard waits bounded by a monotonic budget (page 20 s,
+# panel 8 s), each poll checking `expired()` and its budget first and lasting at most 10 s + a 1 s pause. Segments
+# without an `expired()` check stay under the try in flight: page wait end + activation 41 s, mid-budget
+# re-activation 41 s, panel wait end + extraction + final PRESENT_JS probe 71 s, re-navigation 38 s, so <= 92 s
+# (+ the head PRESENT_JS probe, 30 s, counted apart) — measured by tests/test_scan_fetch.py; 700 s is kept.
 LEGACY_VIDEO_BOUND_S = VIDEO_DEADLINE_S + SOLVER_BUDGET_S + 220
 
 EXIT_SCAN_FAILED = 17
@@ -85,6 +90,8 @@ VIDEO_ERRORS = frozenset(
         "ingest_failed",
     }
 )
+# s26 (console ADR 060, D4/P4): sub-code of the reader's structural guard, closed list (hygiene ADR 054).
+GUARD_STATES = ("ok", "ok_retry", "captcha_late", "login_gate", "no_signal")
 COUNTERS = (
     "videos_targeted",
     "videos_ok",
@@ -204,6 +211,12 @@ def _video_error(code: Any) -> str:
     return code if isinstance(code, str) and code in VIDEO_ERRORS else "unknown"
 
 
+def _guard(code: Any) -> str:
+    if code is None:
+        return "-"
+    return code if isinstance(code, str) and code in GUARD_STATES else "unknown"
+
+
 def run_scan(
     *,
     store: Any,
@@ -242,6 +255,7 @@ def run_scan(
         url = target["video_url"]
         entry: dict[str, Any] = {
             "id": _video_id(target), "extracted": 0, "new": 0, "reviews": 0, "error": None, "baseline": 0,
+            "guard": "-",
         }
         videos.append(entry)
         try:
@@ -282,6 +296,7 @@ def run_scan(
                 return outcome == "solved"
 
             result = fetch(video_url=url, on_captcha=on_captcha, expired=expired, sleep=sleep)
+            entry["guard"] = _guard(result.get("guard"))
             if result.get("ok"):
                 comments = result.get("comments") or []
                 entry["extracted"] = len(comments)
@@ -341,7 +356,7 @@ def emit_lines(result: ScanResult) -> list[str]:
     for v in result.videos:
         lines.append(
             f"video {v['id']}: extracted={v['extracted']} new={v['new']} reviews={v['reviews']} error={v['error'] or '-'}"
-            f" baseline={v.get('baseline', 0)}"
+            f" baseline={v.get('baseline', 0)} guard={v.get('guard', '-')}"
         )
     c = result.counters
     lines.append(

@@ -171,7 +171,10 @@ def test_nominal_run_scans_and_leaves_the_queue_alone(tmp_path):
     assert c["pending_after"] == 3
     assert set(c) == set(ts.COUNTERS)
     assert [v["id"] for v in result.videos] == ["7000", "7001"]
-    assert result.videos[0] == {"id": "7000", "extracted": 1, "new": 1, "reviews": 1, "error": None, "baseline": 1}
+    # s26 : épingle amendée (sous-code de garde `guard`, console ADR 060)
+    assert result.videos[0] == {
+        "id": "7000", "extracted": 1, "new": 1, "reviews": 1, "error": None, "baseline": 1, "guard": "-",
+    }
     assert all(last_scanned(store, video_url(i)) for i in range(2))
     assert statuses(store)[: len(before)] == before  # existing items untouched
 
@@ -219,7 +222,8 @@ def test_first_read_is_a_baseline_then_the_second_read_creates_pending_items(tmp
     assert first.videos[0]["baseline"] == 1 and first.counters["reviews_baseline"] == 1
     assert baseline_at(store, video_url(0)) is not None
     assert new_items(store, video_url(0)) == [("expired", "first_scan_baseline")]
-    assert "video 7000: extracted=1 new=1 reviews=1 error=- baseline=1" in ts.emit_lines(first)
+    # s26 : épingle amendée (champ `guard=` ajouté en fin de ligne, console ADR 060)
+    assert "video 7000: extracted=1 new=1 reviews=1 error=- baseline=1 guard=-" in ts.emit_lines(first)
 
     second = run(store, clock=clock, fetch=fetch)
     assert second.videos[0]["baseline"] == 0 and second.counters["reviews_baseline"] == 0
@@ -911,3 +915,55 @@ def test_main_check_only_legacy_due_uses_the_video_bound(main_env, tmp_path):
     write_jobs(tmp_path / "jobs.json", next_run_at=iso(NOW + 730))
     code, text = run_main(["--check-only"], environ={})
     assert text.strip().splitlines()[-2].endswith(" legacy_due=0")
+
+
+# --- s26 (console ADR 060, D4/P4): guard sub-code in the `video` line, closed list -----------------------------------
+
+
+def test_guard_sub_code_is_appended_to_the_video_line(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[{**ok_fetch(), "guard": "ok_retry"}])
+
+    result = run(store, clock=clock, fetch=fetch)
+
+    assert ts.emit_lines(result)[0] == "video 7000: extracted=1 new=1 reviews=1 error=- baseline=1 guard=ok_retry"
+
+
+def test_guard_absent_is_a_dash(tmp_path):
+    store = make_store(tmp_path, videos=1, items=0)
+    result = run(store)
+    assert ts.emit_lines(result)[0].endswith(" baseline=1 guard=-")
+
+
+@pytest.mark.parametrize("value", ["x y/z", "https://www.tiktok.com/@SENTINEL_AUTHOR/video/1", 3, ""])
+def test_guard_outside_the_closed_list_is_unknown_and_never_printed(tmp_path, value):
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[{**ok_fetch(), "guard": value}])
+
+    result = run(store, clock=clock, fetch=fetch)
+    text = output_of(result)
+
+    assert ts.emit_lines(result)[0].endswith(" guard=unknown")
+    assert "SENTINEL_AUTHOR" not in text and "tiktok.com" not in text and "x y/z" not in text
+
+
+def test_guard_states_closed_list():
+    assert ts.GUARD_STATES == ("ok", "ok_retry", "captcha_late", "login_gate", "no_signal")
+
+
+def test_not_actionable_with_login_gate_is_still_session_lost(tmp_path):
+    store = make_store(tmp_path, videos=2, items=0)
+    clock = Clock()
+    fetch = Fetch(clock, results=[
+        {"ok": False, "error": "tiktok_page_not_actionable", "comments": [], "guard": "login_gate"},
+    ])
+
+    result = run(store, clock=clock, fetch=fetch)
+
+    assert (result.status, result.reason, result.exit_code) == ("failed", "session_lost", 20)
+    assert ts.emit_lines(result)[0] == (
+        "video 7000: extracted=0 new=0 reviews=0 error=tiktok_page_not_actionable baseline=0 guard=login_gate"
+    )
+    assert result.counters["videos_skipped"] == 1
