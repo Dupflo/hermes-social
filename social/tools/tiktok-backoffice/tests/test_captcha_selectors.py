@@ -16,7 +16,7 @@ BANNED = ("location", "reload", ".click(", "dispatchEvent", "MouseEvent", "navig
 
 
 def _scripts() -> dict[str, str]:
-    scripts = {"PRESENT_JS": sel.PRESENT_JS, "FACTS_JS": sel.FACTS_JS}
+    scripts = {"PRESENT_JS": sel.PRESENT_JS, "FACTS_JS": sel.FACTS_JS, "REFRESH_JS": sel.REFRESH_JS}
     for variant in geo.VARIANTS:
         scripts[f"geometry_js({variant})"] = sel.geometry_js(variant)
         for selector in sel.image_selectors(variant):
@@ -103,4 +103,5 @@ def test_dom_modules_have_no_forbidden_call(module):
     source = (APP / module).read_text(encoding="utf-8")
     for banned in ("navigate(", "location.", "reload", '"/refresh"', "delete_tab", "press(", "print("):
         assert banned not in source, banned
-    assert "refresh" not in source.replace("#captcha_refresh_button", "")
+    # s25 : épingle amendée (rafraîchissement relu, console ADR 059): REFRESH_JS only reads a rectangle
+    assert "refresh" not in source.replace("#captcha_refresh_button", "").replace("REFRESH_JS", "")

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import re
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,7 @@ def _waits(actions):
     return sum(a["ms"] for a in actions if a["type"] == "wait")
 
 
-@pytest.mark.parametrize("offset", [0, 1, 37, 69, 170, 250, 400])
+@pytest.mark.parametrize("offset", [0, 1, 37, 69, 170, 250, 333, 400])
 def test_drag_actions_shape(offset):
     start = (120.5, 300.25)
     actions = geo.drag_actions(start, offset, random.Random(7))
@@ -90,10 +91,15 @@ def test_drag_actions_shape(offset):
     moves = [a for a in actions if a["type"] == "move"]
     assert moves[0]["x"] == start[0] and moves[0]["y"] == start[1]
     assert moves[-1]["x"] == start[0] + offset and moves[-1]["y"] == start[1]
-    assert moves[-1].get("steps") == 75
+    # s25 : épingle amendée (geste sous humanize, console ADR 059)
+    assert all("steps" not in m for m in moves)
+    assert len(moves) <= 10
     assert len(actions) <= 400
-    advance = [m for m in moves[1:] if m["y"] == start[1] and "steps" not in m]
-    assert len(advance) <= 125
+    # advance = the moves after the start one, rising in x up to the overshoot point
+    peak = max(range(len(moves)), key=lambda i: moves[i]["x"])
+    advance = moves[1 : peak + 1]
+    assert all(b["x"] > a["x"] for a, b in zip(advance, advance[1:]))
+    assert len(advance) <= geo.DRAG_ADVANCE_MOVES
     for move in moves:
         assert move["x"] >= 0 and move["y"] >= 0
         assert math.isfinite(move["x"]) and math.isfinite(move["y"])
@@ -103,6 +109,116 @@ def test_drag_actions_shape(offset):
             assert isinstance(action["ms"], int) and 0 <= action["ms"] <= 2000
     # the drag goes past the target (+5) before coming back
     assert max(m["x"] for m in moves) >= start[0] + offset + 1 or offset == 0
+
+
+OFFSETS = [0, 1, 5, 37, 69, 120, 170, 250, 333, 400]
+SEEDS = range(20)
+
+
+def _button_states(chunks):
+    """Button state at the end of each request, replaying down/up across requests."""
+    down, states = False, []
+    for chunk, _hold in chunks:
+        for action in chunk:
+            if action["type"] == "down":
+                down = True
+            elif action["type"] == "up":
+                down = False
+        states.append(down)
+    return states
+
+
+def _check_split(actions, max_requests):
+    chunks = geo.split_gesture(actions)
+    assert 1 <= len(chunks) <= max_requests
+    assert [a for chunk, _ in chunks for a in chunk] == actions
+    assert all(chunk for chunk, _ in chunks)
+    for chunk, _ in chunks:
+        assert geo.request_worst_case_s(chunk) <= geo.GESTURE_REQUEST_BUDGET_S
+    states = _button_states(chunks)
+    assert [hold for _, hold in chunks] == states
+    assert chunks[-1][1] is False
+    return chunks
+
+
+@pytest.mark.parametrize("offset", OFFSETS)
+def test_split_drag_keeps_every_request_under_budget(offset):
+    for seed in SEEDS:
+        actions = geo.drag_actions((120.5, 300.25), offset, random.Random(seed))
+        chunks = _check_split(actions, 3)
+        assert chunks[-1][0][-1]["type"] == "up"
+        assert len(chunks) >= 2  # worst case of the whole drag is above one request's budget
+
+
+@pytest.mark.parametrize("n", range(1, geo.MAX_ICON_POINTS + 1))
+def test_split_clicks_cut_after_an_up(n):
+    for seed in SEEDS:
+        points = [(10.0 + i, 20.0 + i) for i in range(n)]
+        actions = geo.click_actions(points, random.Random(seed))
+        chunks = _check_split(actions, math.ceil(n / 3))
+        for chunk, hold in chunks[:-1]:
+            assert chunk[-1]["type"] == "up"
+            assert hold is False
+
+
+def test_split_gesture_refuses_an_action_above_the_budget():
+    with pytest.raises(ValueError):
+        geo.split_gesture([{"type": "move", "x": 1, "y": 1, "steps": 20}, {"type": "up"}])
+
+
+def test_request_worst_case_model():
+    actions = [
+        {"type": "move", "x": 1, "y": 1},
+        {"type": "wait", "ms": 500},
+        {"type": "down"},
+        {"type": "up"},
+    ]
+    assert geo.request_worst_case_s(actions) == pytest.approx(
+        geo.HUMANIZE_MOVE_MAX_S + 0.5 + 2 * geo.BUTTON_ACTION_S
+    )
+
+
+PLUGIN_SOURCE = (
+    Path(__file__).resolve().parents[4] / "deploy" / "camofox-plugins" / "console-mouse" / "index.js"
+).read_text(encoding="utf-8")
+
+
+def _plugin_limit(name):
+    match = re.search(rf"^\s*{name}:\s*(\d+),", PLUGIN_SOURCE, re.M)
+    assert match, name
+    return int(match.group(1))
+
+
+def test_cost_model_mirrors_the_plugin_limits():
+    assert geo.GESTURE_REQUEST_BUDGET_S * 2 <= geo.PLUGIN_MAX_RUNTIME_S
+    assert geo.PLUGIN_MAX_RUNTIME_S * 1000 == _plugin_limit("maxRuntimeMs")
+    assert geo.PLUGIN_HOLD_RELEASE_S * 1000 == _plugin_limit("holdReleaseMs")
+
+
+def _pre_s25_drag(sx, sy, offset):
+    """The pre-s25 rotate gesture, rebuilt literally (≈ 85 moves + a final move at steps: 75)."""
+    step = max(1, math.ceil(offset / 120))
+    actions = [{"type": "move", "x": sx, "y": sy}, {"type": "wait", "ms": 500}, {"type": "down"}]
+    for pixel in range(0, offset + 5, step):
+        actions += [{"type": "move", "x": sx + pixel, "y": sy}, {"type": "wait", "ms": 10}]
+    actions.append({"type": "wait", "ms": 250})
+    for pixel in range(-5, 2):
+        actions += [{"type": "move", "x": sx + offset - pixel, "y": max(0, sy + pixel)}, {"type": "wait", "ms": 5}]
+    actions += [
+        {"type": "wait", "ms": 200},
+        {"type": "move", "x": sx + offset, "y": sy, "steps": 75},
+        {"type": "wait", "ms": 300},
+        {"type": "up"},
+    ]
+    return actions
+
+
+def test_pre_s25_gesture_is_classified_above_the_plugin_ceiling():
+    old = _pre_s25_drag(120.0, 300.0, 78)
+    assert sum(1 for a in old if a["type"] == "move") >= 85
+    assert geo.request_worst_case_s(old) > geo.PLUGIN_MAX_RUNTIME_S
+    new = geo.drag_actions((120.0, 300.0), 78, random.Random(1))
+    assert geo.request_worst_case_s(new) < geo.request_worst_case_s(old)
 
 
 def test_drag_actions_deterministic_with_a_fixed_seed():

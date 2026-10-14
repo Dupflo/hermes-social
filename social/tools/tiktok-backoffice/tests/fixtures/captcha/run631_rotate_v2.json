@@ -1,0 +1,35 @@
+{
+  "source": "hermes-console docs/deploy-evidence/s23-tiktok-scan-job.md (run 631, exit_18) + Camofox log read on 2026-10-14 (research s25, addendum R3); no content data",
+  "variant": "rotate_v2",
+  "observed": [
+    {
+      "try": 1,
+      "result": "failed",
+      "ms": 22400,
+      "label": "rotate gesture in one console-mouse request, cut by the plugin",
+      "mouse": {"status": 504, "ms": 20350}
+    },
+    {
+      "try": 2,
+      "result": "failed",
+      "ms": 800,
+      "label": "essai qui suit un rafraîchissement raté (click on a detached captcha button, the try left on a captcha being redrawn)"
+    },
+    {
+      "try": 3,
+      "type": "unknown",
+      "result": "unrecognized",
+      "ms": 5000,
+      "label": "identification window of 5 s on a captcha being redrawn"
+    }
+  ],
+  "simulation": {
+    "move_cost_s": 1.5,
+    "plugin_max_s": 20,
+    "refresh_detached_s_after_failure": 3,
+    "blank_envelope_s_after_refresh": 8,
+    "verdicts": [[true], [false, false]],
+    "sadcaptcha_angle": 137,
+    "old_facts_window_s": 5
+  }
+}

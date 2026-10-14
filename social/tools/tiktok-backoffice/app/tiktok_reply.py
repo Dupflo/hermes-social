@@ -44,13 +44,15 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, TextIO
 
 from app.camofox_reader import CamofoxClient, CamofoxError
-from app.captcha_solver import CaptchaReport, solve_captcha
+from app.captcha_solver import CaptchaReport, diagnostic_lines, solve_captcha
 from app.config import Settings
 from app.store import TikTokBackofficeStore, sqlite_utc
 from app.tiktok_reply_page import (
+    PAGE_UNUSABLE_CODES,
     DmUnavailable,
     LoginGate,
     PageError,
+    PageUnusable,
     SendUncertain,
     TikTokReplyPage,
     dm_present,
@@ -94,6 +96,7 @@ OUTCOMES = (
     "claim_lost",
 )
 ACTION_STATES = ("sent", "unverified", "present", "skipped", "-")
+ITEM_KEYS = ("id", "outcome", "dm", "reply")  # keys of CONSOLE_RESULT `items` (the `page=` code stays on stdout)
 FAILED_OUTCOMES = frozenset(
     {"campaign_unknown", "campaign_inactive", "no_dm_text", "target_not_found", "dm_unavailable", "not_verified",
      "public_reply_not_verified"}
@@ -232,7 +235,10 @@ class _Run:
         item_clock = {"started": self.clock(), "paused": 0.0}
 
         def finish(status: str, outcome: str, reason: str | None) -> dict[str, Any]:
-            self.store.finish_review_item(rid, status, reason=reason)
+            # s25 (s24 m4, console ADR 059, P8): a refused finish = the item was requeued meanwhile; the actions
+            # (and their rows) stay, the item is reported `claim_lost`.
+            if not self.store.finish_review_item(rid, status, reason=reason):
+                outcome = "claim_lost"
             entry["outcome"] = outcome
             return entry
 
@@ -373,11 +379,16 @@ class _Run:
             except (_Stop, ReplyTerminated):
                 raise
             except LoginGate:
+                if state["acted"]:
+                    # s25 (s24 m1, console ADR 059): session lost after the verified DM, the item never stays `sending`.
+                    finish("failed", "public_reply_not_verified", "public_reply_not_verified")
                 raise _Stop("session_lost") from None
-            except (PageError, *_BROWSER_ERRORS):
+            except (PageError, *_BROWSER_ERRORS) as exc:
                 if state["acted"]:
                     # A page failure between the DM and the public reply: the DM row stays, the item is replayable.
                     finish("failed", "public_reply_not_verified", "public_reply_not_verified")
+                elif isinstance(exc, PageUnusable) and exc.args and exc.args[0] in PAGE_UNUSABLE_CODES:
+                    entry["page"] = exc.args[0]  # s25 (P7): printed on the `item` line only
                 raise _Stop("browser_unavailable") from None
         except _Stop as stop:
             if not state["acted"] and not entry["outcome"]:
@@ -491,6 +502,8 @@ def run_reply(
                 counters["items_already_present"] += 1
             elif outcome == "released":
                 counters["items_released"] += 1
+            elif outcome == "claim_lost":
+                counters["items_claim_lost"] += 1
             elif outcome in FAILED_OUTCOMES:
                 counters["items_failed"] += 1
         if code:
@@ -515,7 +528,8 @@ def emit_lines(result: ReplyResult) -> list[str]:
             f" legacy_backlog={c['items_legacy_backlog']} budget={result.budget_at_start}/{c['budget_limit']} owner=ok"
         )
     for i in result.items:
-        lines.append(f"item {i['id']}: outcome={i['outcome']} dm={i['dm']} reply={i['reply']}")
+        page = f" page={i['page']}" if i.get("page") in PAGE_UNUSABLE_CODES else ""
+        lines.append(f"item {i['id']}: outcome={i['outcome']} dm={i['dm']} reply={i['reply']}{page}")
     if result.reason == "rate_limited" and c["deferred"]:
         lines.append(f"queue: deferred rate_limited n={c['deferred']}")
     if result.released_code is not None and c["items_released"]:
@@ -537,7 +551,7 @@ def console_result_line(result: ReplyResult, report: CaptchaReport) -> str:
         "status": "skipped" if result.status == "skipped" else "ok",
         "reason": result.reason,
         "counters": dict(result.counters),
-        "items": [dict(i) for i in result.items[:ITEM_LIMIT]],
+        "items": [{key: i[key] for key in ITEM_KEYS} for i in result.items[:ITEM_LIMIT]],
     }
     if report.captchas:
         payload["captchas"] = report.to_json()
@@ -656,12 +670,16 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ,
         raise
     except BaseException as exc:  # noqa: BLE001 - class name only, never the message
         emit(f"tiktok-reply: error=internal class={type(exc).__name__}")
+        for line in diagnostic_lines(report):
+            emit(line)
         emit(_zero_payload(report, "internal"))
         return EXIT_INTERNAL
     finally:
         signal.signal(signal.SIGTERM, previous)
 
     for line in emit_lines(result):
+        emit(line)
+    for line in diagnostic_lines(report):  # s25 (console ADR 059): right before CONSOLE_RESULT, still the last line
         emit(line)
     emit(console_result_line(result, report))
     return result.exit_code

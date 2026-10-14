@@ -197,6 +197,24 @@ def test_crlf_is_normalized_and_no_typed_text_holds_a_newline():
     assert not any(c == ("press", "Enter") for c in client.calls)
 
 
+def test_m5_type_dm_refuses_an_editor_that_is_not_empty():
+    # s25 (s24 m5, console ADR 059, P7): a draft left in the editor is never completed nor sent
+    thread = fixture("dm_editor_not_empty.json")["thread"]
+    client = FakeClient(answers={is_thread: thread})
+    with pytest.raises(trp.PageUnusable) as info:
+        page(client).type_dm("t1", "Salut !")
+    assert str(info.value) == "dm_editor_not_empty"
+    assert not any(c[0] in ("type_text", "press") for c in client.calls)
+
+
+@pytest.mark.parametrize("text", ["", "   ", None])
+def test_m5_type_dm_types_into_an_empty_editor(text):
+    thread = {"login_gate": False, "editor": dict(handle("ED"), text=text), "outgoing": [], "send_button": None, "error": False}
+    client = FakeClient(answers={is_thread: thread})
+    page(client).type_dm("t1", "Salut")
+    assert ("type_text", "ED", "Salut") in client.calls
+
+
 def test_type_dm_without_editor_is_page_unusable():
     client = FakeClient(answers={is_thread: {"login_gate": False, "editor": None, "outgoing": [], "send_button": None}})
     with pytest.raises(trp.PageUnusable):

@@ -197,7 +197,8 @@ def test_b1_requeue_between_the_dm_click_and_finish_never_sends_a_second_dm(tmp_
 
     assert item_row(base, rid) == ("pending_review", None)  # finish refused: the console requeued it
     assert [r["message_type"] for r in outbound(base) if r["status"] == "sent"][:1] == ["private_reply"]
-    assert first.items[0]["outcome"] == "posted"
+    # s25 : épingle amendée (s24 m4, console ADR 059) — the refused finish is now reported, was "posted"
+    assert first.items[0]["outcome"] == "claim_lost"
 
     second = run_once(base, page)
 
