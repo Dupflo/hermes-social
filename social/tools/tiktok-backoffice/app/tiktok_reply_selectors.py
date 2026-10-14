@@ -40,6 +40,13 @@ DM_EDITOR_POLL_S = 1.0
 DM_EDITOR_WAIT_S = 15.0
 DM_OPEN_ATTEMPTS = 2
 DM_VERIFY_WAIT_S = 10.0
+# s30 review fix MA1: the conversation is read for the guard before typing only once it is settled — at least
+# THREAD_SETTLE_S (the former fixed settle) after the « Message » click AND two consecutive identical reads of the
+# thread, within DM_SETTLE_WAIT_S after the editor was first seen (captcha time excluded); never settled =>
+# `no_dm_editor` (nothing typed). After the send, AFTER_SEND_SETTLE_S >= THREAD_SETTLE_S and a confirmation needs two
+# consecutive identical reads.
+THREAD_SETTLE_S = 4.0
+DM_SETTLE_WAIT_S = 8.0
 MAX_VIEW_REPLIES_CLICKS = 2
 
 PROFILE_URL = "https://www.tiktok.com/{handle}"

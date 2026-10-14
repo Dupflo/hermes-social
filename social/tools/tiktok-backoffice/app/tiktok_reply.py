@@ -27,8 +27,9 @@ Outcomes (ADR 011 contract; the exit code wins over the CONSOLE_RESULT line, whi
 s30 (console ADR 064): the DM is opened by real clicks with a bounded wait for the editor and one more attempt
 (app/tiktok_reply_page.py); no « Message » button => the item is released with `page=no_dm_button`, no editor =>
 `page=no_dm_editor` (exit 21, nothing sent); a captcha on the profile goes through the same solver before anything is
-read there; nothing is typed when a bubble or the conversation already holds the DM; the send is verified by bounded
-reads, never replayed. Each item's DM path prints `dm_probe item=<id> step=<profile|thread|verify> <key>=<value>…`
+read there; nothing is typed when a bubble or the conversation already holds the DM, read on a settled conversation
+only (review fix MA1: THREAD_SETTLE_S after the click and two identical reads, else `no_dm_editor`); the send is
+verified by bounded reads (a confirmation on two identical reads), never replayed. Each item's DM path prints `dm_probe item=<id> step=<profile|thread|verify> <key>=<value>…`
 lines right after its `item` line (structure only, closed keys and values; never in CONSOLE_RESULT).
 
 Hygiene: the output holds numeric ids, counters and codes from closed lists only (OUTCOMES, ACTION_STATES). Never

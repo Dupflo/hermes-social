@@ -166,7 +166,7 @@ DM_PROBE_KEYS: dict[str, tuple[str, ...]] = {
         "attempt", "renavigated", "click", "tabs_before", "tabs_after", "new_tab", "editor", "waited_ms",
         "captcha_ms", "polls", "editors", "ed_tag", "ed_e2e", "ed_role", "ed_cls", "ed1_tag", "ed1_e2e", "ed1_cls",
         "ed2_tag", "ed2_e2e", "ed2_cls", "path_messages", "chat_items", "send_btn", "send_tag", "send_e2e",
-        "send_cls", "dm_block",
+        "send_cls", "dm_block", "settled", "settle_reads",
     ),
     "verify": ("editor", "editor_empty", "error", "outgoing", "bubble_match", "conv_after", "verified", "polls", "ms"),
 }
@@ -220,6 +220,20 @@ def _is_inbox_tab(url: Any) -> bool:
         return False
     host = (parts.hostname or "").lower()
     return (host == "tiktok.com" or host.endswith(".tiktok.com")) and parts.path.startswith("/messages")
+
+
+def thread_signature(thread: dict[str, Any]) -> tuple[Any, ...]:
+    """s30 review fix MA1: what two consecutive reads of a settled thread share — editor present and its text, send
+    error, chat items, outgoing bubbles and the conversation column (kept in memory, never printed)."""
+    thread = thread if isinstance(thread, dict) else {}
+    editor = thread.get("editor")
+    probe = thread.get("probe") if isinstance(thread.get("probe"), dict) else {}
+    outgoing = thread.get("outgoing") if isinstance(thread.get("outgoing"), list) else []
+    return (
+        isinstance(editor, dict), normalize(editor.get("text")) if isinstance(editor, dict) else None,
+        bool(thread.get("error")), probe.get("chat_items"), tuple(str(b) for b in outgoing),
+        str(thread.get("conversation") or ""),
+    )
 
 
 def _shape_fields(prefix: str, shape: Any, keys: tuple[str, ...]) -> dict[str, Any]:
@@ -425,6 +439,10 @@ class TikTokReplyPage:
         editor: one more attempt on a button recomputed by a new PROFILE_JS — on the current page if it is still the
         profile with a unique button, else after one navigation of the same tab back to the profile. Still none =>
         `no_dm_editor`. A new tab after a click => `no_dm_editor` at once (inbox tabs we caused are closed).
+
+        s30 review fix MA1: once the editor is seen, the tab is returned only on a settled conversation (THREAD_SETTLE_S
+        after the click and two consecutive identical reads, within DM_SETTLE_WAIT_S), so that the guard before typing
+        never reads a history still loading; never settled => `no_dm_editor` at once, no other click.
         """
         self._dm_probe = []
         began = self.clock()
@@ -464,6 +482,10 @@ class TikTokReplyPage:
         new_tab = False
         polls = 0
         paused = 0.0
+        editor_at: float | None = None  # time in the window when the editor was first seen
+        previous: tuple[Any, ...] | None = None
+        settle_reads = 0
+        settled = False
         started = self.clock()
         try:
             fields["click"] = self._click(tab, button, mouse=in_view)
@@ -483,10 +505,22 @@ class TikTokReplyPage:
                             self.close(str(extra.get("tabId")))
                     break
                 thread = self._snapshot(tab, sel.THREAD_JS)
-                polls += 1
-                if isinstance(thread.get("editor"), dict):
+                elapsed = self.clock() - started - paused
+                if editor_at is None:
+                    polls += 1
+                    if isinstance(thread.get("editor"), dict):
+                        editor_at, previous = elapsed, thread_signature(thread)
+                    elif elapsed >= sel.DM_EDITOR_WAIT_S:
+                        break
+                    continue
+                # MA1: the conversation is settled — THREAD_SETTLE_S after the click, two identical reads in a row
+                settle_reads += 1
+                signature = thread_signature(thread)
+                if signature == previous and signature[0] and elapsed >= sel.THREAD_SETTLE_S:
+                    settled = True
                     break
-                if self.clock() - started - paused >= sel.DM_EDITOR_WAIT_S:
+                previous = signature
+                if elapsed - editor_at >= sel.DM_SETTLE_WAIT_S:
                     break
         finally:
             snap = thread or {}
@@ -503,10 +537,15 @@ class TikTokReplyPage:
                            "send_btn": isinstance(snap.get("send_button"), dict)})
             fields.update(_shape_fields("send_", tprobe.get("send"), ("tag", "e2e", "cls")))
             fields["dm_block"] = tprobe.get("dm_block")
+            fields.update({"settled": settled, "settle_reads": settle_reads})
             self._dm_probe.append(("thread", fields))
         if new_tab:
             raise PageUnusable("no_dm_editor")
-        return thread is not None and isinstance(thread.get("editor"), dict)
+        if editor_at is None:
+            return False
+        if not settled:
+            raise PageUnusable("no_dm_editor")  # MA1: fail-closed, nothing is typed on a conversation still moving
+        return True
 
     def type_dm(self, tab: str, text: str) -> None:
         editor = self.thread_snapshot(tab).get("editor")
@@ -526,18 +565,27 @@ class TikTokReplyPage:
 
     def verify_dm(self, tab: str, text: str) -> bool:
         """s30 (console ADR 064, D4, A3): the thread read again every DM_EDITOR_POLL_S up to DM_VERIFY_WAIT_S until
-        dm_verified; never a click nor a keystroke (the send click is never replayed)."""
+        dm_verified; never a click nor a keystroke (the send click is never replayed).
+
+        s30 review fix MA1: the first read comes AFTER_SEND_SETTLE_S (>= THREAD_SETTLE_S) after the send click, and a
+        confirmation holds only on two consecutive identical reads that both verify (a settled thread)."""
         started = self.clock()
         polls = 0
         thread: dict[str, Any] = {}
         verified = False
+        confirmed: tuple[Any, ...] | None = None
         try:
             while True:
                 thread = self.thread_snapshot(tab)
                 polls += 1
+                signature = thread_signature(thread)
                 if dm_verified(thread, text):
-                    verified = True
-                    break
+                    if signature == confirmed:
+                        verified = True
+                        break
+                    confirmed = signature
+                else:
+                    confirmed = None
                 if self.clock() - started >= sel.DM_VERIFY_WAIT_S:
                     break
                 self.sleep(sel.DM_EDITOR_POLL_S)

@@ -127,7 +127,7 @@ def test_probe_keys_are_the_closed_lists():
     assert trp.DM_PROBE_KEYS["thread"] == tuple(
         "attempt renavigated click tabs_before tabs_after new_tab editor waited_ms captcha_ms polls editors ed_tag"
         " ed_e2e ed_role ed_cls ed1_tag ed1_e2e ed1_cls ed2_tag ed2_e2e ed2_cls path_messages chat_items send_btn"
-        " send_tag send_e2e send_cls dm_block".split())
+        " send_tag send_e2e send_cls dm_block settled settle_reads".split())
     assert trp.DM_PROBE_KEYS["verify"] == tuple(
         "editor editor_empty error outgoing bubble_match conv_after verified polls ms".split())
 
@@ -704,8 +704,8 @@ def test_open_dm_captcha_gate_at_every_read_of_the_wait():
     gate = Gate(client, clock)
     p = dm_page(client, clock)
     p.open_dm("@fan", captcha_gate=gate)
-    polls = sum(t["polls"] for t in probes(p, "thread"))
-    # one before each PROFILE_JS (2) and one before each read of the wait
+    polls = sum(t["polls"] + t["settle_reads"] for t in probes(p, "thread"))
+    # one before each PROFILE_JS (2) and one before each read of the wait and of the settle (s30 review fix MA1)
     assert gate.n == 2 + polls
     names = [c[0] for c in client.calls]
     for i, name in enumerate(names):
@@ -779,7 +779,7 @@ def test_open_dm_mouse_fallback_only_when_the_button_is_in_view():
     assert [c[0] for c in clicks(client)] == ["click_selector"]
 
 
-def test_verify_dm_reads_again_without_any_gesture_and_stops_at_the_first_confirmation():
+def test_verify_dm_reads_again_without_any_gesture_and_stops_at_the_first_settled_confirmation():
     clock = FakeClock()
     client = DmClient(profiles=[profile_snap()], threads=lambda c: thread_snap(outgoing=["autre"]))
     p = dm_page(client, clock)
@@ -798,9 +798,10 @@ def test_verify_dm_reads_again_without_any_gesture_and_stops_at_the_first_confir
     client = DmClient(profiles=[profile_snap()], threads=third)
     p = dm_page(client, FakeClock())
     assert p.verify_dm("t1", "hello") is True
-    assert seen["n"] == 3
+    # s30 review fix MA1: confirmed at the 3rd read, settled (identical) at the 4th, then no more reads
+    assert seen["n"] == 4
     verify = probes(p, "verify")[0]
-    assert (verify["verified"], verify["polls"], verify["bubble_match"], verify["editor_empty"]) == (True, 3, True, True)
+    assert (verify["verified"], verify["polls"], verify["bubble_match"], verify["editor_empty"]) == (True, 4, True, True)
 
 
 def test_verify_dm_by_the_conversation_column():
@@ -839,14 +840,185 @@ def test_open_dm_login_gate_on_the_profile():
     assert clicks(client) == []
 
 
+# --- s30 review fix MA1: the guard and the verification read a settled conversation only ---------------------------
+
+
+def history_after(clock, clicked, steps):
+    """THREAD_JS with an editor at once; the conversation column is the last `value` whose `at` <= t - click."""
+    def read(client):
+        if clicked.get("t") is None:
+            return thread_snap(editor=False)
+        elapsed = clock.t - clicked["t"]
+        text = ""
+        for at, value in steps:
+            if elapsed >= at:
+                text = value
+        return thread_snap(conversation=text)
+    return read
+
+
+def mark_click(clock, clicked):
+    def hook(client, selector):
+        clicked["t"] = clock.t
+    return hook
+
+
+def test_ma1_open_dm_waits_for_a_history_loaded_after_the_editor_before_the_guard():
+    clock, clicked = FakeClock(), {}
+    client = DmClient(profiles=[profile_snap()], threads=history_after(clock, clicked, [(3, "Fan old hello")]),
+                      on_click=mark_click(clock, clicked))
+    p = dm_page(client, clock)
+    tab = p.open_dm("@fan", captcha_gate=Gate(client, clock))
+    assert clock.t - clicked["t"] >= sel.THREAD_SETTLE_S
+    # the replayed item's DM already went: the guard read right after open_dm sees it => nothing typed
+    assert trp.dm_already_there(p.thread_snapshot(tab), "hello") is True
+    thread = probes(p, "thread")[0]
+    assert (thread["editor"], thread["polls"], thread["settled"]) == (True, 1, True)
+    assert thread["settle_reads"] >= 3 and len(clicks(client)) == 1
+
+
+def test_ma1_open_dm_needs_two_identical_reads_of_a_loading_history():
+    clock, clicked = FakeClock(), {}
+    steps = [(1, "a"), (2, "a b"), (3, "a b c"), (4, "a b c d"), (5, "a b c d e"), (6, "a b c d e hello")]
+    client = DmClient(profiles=[profile_snap()], threads=history_after(clock, clicked, steps),
+                      on_click=mark_click(clock, clicked))
+    p = dm_page(client, clock)
+    tab = p.open_dm("@fan", captcha_gate=Gate(client, clock))
+    assert clock.t - clicked["t"] >= 7
+    assert trp.dm_already_there(p.thread_snapshot(tab), "hello") is True
+
+
+def test_ma1_open_dm_never_settled_is_no_dm_editor_types_nothing_and_clicks_once():
+    clock, seen = FakeClock(), {"n": 0}
+
+    def moving(client):
+        seen["n"] += 1
+        return thread_snap(conversation="x" * seen["n"])
+
+    client = DmClient(profiles=[profile_snap()], threads=moving)
+    p = dm_page(client, clock)
+    with pytest.raises(trp.PageUnusable) as info:
+        p.open_dm("@fan", captcha_gate=Gate(client, clock))
+    assert str(info.value) == "no_dm_editor"
+    assert len(clicks(client)) == 1
+    assert not any(c[0] in ("type_text", "press") for c in client.calls)
+    thread = probes(p, "thread")[0]
+    assert (thread["editor"], thread["settled"]) == (True, False)
+    assert thread["waited_ms"] <= (sel.DM_EDITOR_POLL_S * 2 + sel.DM_SETTLE_WAIT_S) * 1000
+
+
+def test_ma1_verify_dm_never_confirms_on_a_conversation_still_moving():
+    clock, seen = FakeClock(), {"n": 0}
+
+    def moving(client):
+        seen["n"] += 1
+        return thread_snap(conversation="hello " + "x" * seen["n"])
+
+    client = DmClient(profiles=[profile_snap()], threads=moving)
+    p = dm_page(client, clock)
+    assert p.verify_dm("t1", "hello") is False
+    assert clicks(client) == [] and not any(c[0] in ("type_text", "press") for c in client.calls)
+    assert probes(p, "verify")[0]["verified"] is False
+
+
+def test_ma1_the_send_settle_is_at_least_the_thread_settle():
+    # verify_dm's first read comes AFTER_SEND_SETTLE_S after the send click: never right after the send
+    assert sel.AFTER_SEND_SETTLE_S >= sel.THREAD_SETTLE_S == 4.0
+
+
+# s30 review m3: the budget counts the Camofox calls, not only the fixed waits. NOMINAL_CALL_S = one call as seen in
+# prod (run 1182: 46 s for ~25 s of fixed waits and ~20 calls). The worst DM path is replayed on a clock where every
+# call costs NOMINAL_CALL_S. A slower Camofox (up to STEP_TIMEOUT_S per call) can overrun ITEM_DEADLINE_S: the
+# check_deadline() right after open_dm then releases the item before anything is typed (_ItemDeadline, nothing sent).
+NOMINAL_CALL_S = 1.0
+
+
+class CostClock(FakeClock):
+    pass
+
+
+class CostClient(DmClient):
+    def __init__(self, clock, **kwargs):
+        super().__init__(**kwargs)
+        self.clock = clock
+
+    def _cost(self):
+        self.clock.t += NOMINAL_CALL_S
+
+    def list_tabs(self, *, timeout=None):
+        self._cost()
+        return super().list_tabs(timeout=timeout)
+
+    def create_blank_tab(self, session_key, *, timeout=None):
+        self._cost()
+        return super().create_blank_tab(session_key, timeout=timeout)
+
+    def navigate(self, tab, url, *, timeout=35):
+        self._cost()
+        return super().navigate(tab, url, timeout=timeout)
+
+    def evaluate_value(self, tab, expression, *, timeout=None):
+        self._cost()
+        return super().evaluate_value(tab, expression, timeout=timeout)
+
+    def click_selector(self, tab, selector, *, timeout=None):
+        self._cost()
+        return super().click_selector(tab, selector, timeout=timeout)
+
+
+class CostGate(Gate):
+    def __call__(self, tab):  # the captcha probe is one Camofox call (excluded from the wait window, not from time)
+        self.clock.t += NOMINAL_CALL_S
+        return super().__call__(tab)
+
+
 def test_dm_wait_budget_invariant():
     from app import tiktok_reply as tr
 
     assert sel.DM_OPEN_ATTEMPTS == 2 and sel.DM_EDITOR_POLL_S == 1.0 and sel.DM_EDITOR_WAIT_S == 15.0
-    assert sel.DM_VERIFY_WAIT_S == 10.0
-    assert (sel.PROFILE_SETTLE_S * 2 + sel.DM_EDITOR_WAIT_S * sel.DM_OPEN_ATTEMPTS + sel.AFTER_SEND_SETTLE_S
-            + sel.DM_VERIFY_WAIT_S + sel.VIDEO_SETTLE_S + sel.PANEL_SETTLE_S) <= tr.ITEM_DEADLINE_S / 2
-    assert not hasattr(sel, "THREAD_SETTLE_S")
+    assert sel.DM_VERIFY_WAIT_S == 10.0 and sel.THREAD_SETTLE_S == 4.0 and sel.DM_SETTLE_WAIT_S == 8.0
+    fixed = (sel.PROFILE_SETTLE_S * 2 + sel.DM_EDITOR_WAIT_S * sel.DM_OPEN_ATTEMPTS + sel.DM_SETTLE_WAIT_S
+             + sel.AFTER_SEND_SETTLE_S + sel.DM_VERIFY_WAIT_S + sel.VIDEO_SETTLE_S + sel.PANEL_SETTLE_S * 2
+             + sel.REPLIES_SETTLE_S * sel.MAX_VIEW_REPLIES_CLICKS)
+    assert fixed <= tr.ITEM_DEADLINE_S / 2
+
+    profiles = [profile_snap("MSG1"), profile_snap("MSG2", path=False), profile_snap("MSG3")]
+
+    # calibration: no editor at all => the number of reads of the second attempt's wait
+    clock = CostClock()
+    client = CostClient(clock, profiles=list(profiles), threads=lambda c: thread_snap(editor=False))
+    p = dm_page(client, clock)
+    with pytest.raises(trp.PageUnusable):
+        p.open_dm("@fan", captcha_gate=CostGate(client, clock))
+    last_read = probes(p, "thread")[1]["polls"]
+
+    # worst open_dm: renavigation, the editor at the last read of attempt 2, a conversation that never settles
+    clock, seen = CostClock(), {"n": 0}
+
+    def worst(c):
+        if c.clicks < 2:
+            return thread_snap(editor=False)
+        seen["n"] += 1
+        return thread_snap(editor=seen["n"] >= last_read, conversation="x" * seen["n"])
+
+    client = CostClient(clock, profiles=list(profiles), threads=worst)
+    began = clock.t
+    with pytest.raises(trp.PageUnusable):
+        dm_page(client, clock).open_dm("@fan", captcha_gate=CostGate(client, clock))
+    open_dm_s = clock.t - began
+
+    # worst verify_dm: never confirmed
+    clock = CostClock()
+    client = CostClient(clock, profiles=[profile_snap()], threads=lambda c: thread_snap(outgoing=["autre"]))
+    began = clock.t
+    assert dm_page(client, clock).verify_dm("t1", "hello") is False
+    verify_s = clock.t - began
+
+    calls = NOMINAL_CALL_S
+    guard_type_send = 2 * calls + 2 * calls + 2 * calls + sel.AFTER_SEND_SETTLE_S  # gate+THREAD_JS, type, send
+    video = (3 * calls + sel.VIDEO_SETTLE_S + calls + 9 * calls + sel.PANEL_SETTLE_S * 2
+             + sel.REPLIES_SETTLE_S * sel.MAX_VIEW_REPLIES_CLICKS)
+    assert open_dm_s + guard_type_send + verify_s + video <= tr.ITEM_DEADLINE_S
 
 
 # --- source-level interdicts (D4, D9, P8) ---------------------------------------------------------------------------
