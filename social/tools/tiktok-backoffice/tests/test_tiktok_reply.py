@@ -694,6 +694,65 @@ def test_login_gate_releases_and_exits_24(tmp_path):
     assert item_row(store, rid) == ("pending_review", None)
 
 
+def test_m1_login_gate_after_a_verified_dm_fails_the_item_and_keeps_the_dm_row(tmp_path):
+    # s25 (s24 m1, console ADR 059): the session is lost between the verified DM and the public reply
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.fail["post_reply"] = trp.LoginGate("login_gate")
+    result = run(store, page)
+    assert (result.status, result.exit_code) == ("failed", 24)
+    assert item_row(store, rid) == ("failed", "public_reply_not_verified")
+    assert [(r["message_type"], r["status"]) for r in outbound(store)] == [("private_reply", "sent")]
+    assert f"item {rid}: outcome=public_reply_not_verified dm=sent reply=-" in tr.emit_lines(result)
+    assert result.counters["dm_sent"] == 1 and result.counters["items_failed"] == 1
+
+
+def test_m4_finish_refused_after_a_dm_is_claim_lost(tmp_path):
+    # s25 (s24 m4, console ADR 059): the item was requeued between the click and the end; the actions happened
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    store.finish_review_item = lambda review_id, status, *, reason: False
+    result = run(store, page)
+    assert result.items == [{"id": rid, "outcome": "claim_lost", "dm": "sent", "reply": "sent"}]
+    assert result.counters["items_claim_lost"] == 1
+    assert result.counters["items_posted"] == 0 and result.counters["items_failed"] == 0
+    assert result.counters["dm_sent"] == 1 and result.counters["actions_sent"] == 2
+    assert [(r["message_type"], r["status"]) for r in outbound(store)] == [("private_reply", "sent"), ("public_reply", "sent")]
+    assert (result.status, result.exit_code) == ("ok", 0)
+
+
+def test_m5_dm_editor_not_empty_releases_the_item_with_its_page_code(tmp_path):
+    # s25 (s24 m5, console ADR 059, P7): nothing typed, nothing sent, the item released, exit 21
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.fail["type_dm"] = trp.PageUnusable("dm_editor_not_empty")
+    report = CaptchaReport()
+    result = run(store, page, report=report)
+    assert (result.status, result.exit_code) == ("failed", 21)
+    assert item_row(store, rid) == ("pending_review", None)
+    assert outbound(store) == [] and page.sends() == []
+    assert f"item {rid}: outcome=released dm=- reply=- page=dm_editor_not_empty" in tr.emit_lines(result)
+    payload = json.loads(tr.console_result_line(result, report)[len("CONSOLE_RESULT "):])
+    assert payload["items"] == [{"id": rid, "outcome": "released", "dm": "-", "reply": "-"}]
+
+
+def test_page_code_only_for_a_page_unusable_release(tmp_path):
+    store = make_store(tmp_path)
+    _, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.fail["open_dm"] = CamofoxUnreachable()
+    result = run(store, page)
+    assert result.exit_code == 21
+    assert not any(" page=" in line for line in tr.emit_lines(result))
+
+
 def test_camofox_unreachable_before_action_releases_and_exits_21(tmp_path):
     store = make_store(tmp_path)
     rid, author = add_item(store)
@@ -1002,6 +1061,62 @@ def test_main_failing_exits_end_with_console_result(main_env, setup, code, capsy
         assert "tiktok-reply: error=internal class=RuntimeError" in text
     assert "SENTINEL_TRACE" not in text
     assert KEY not in text + "".join(capsys.readouterr())
+
+
+
+DIAGNOSTICS = [
+    {"seq": 1, "try": 1, "variant": "rotate_v2", "step": "not_gone", "angle": 137, "distance": 105, "requests": 2,
+     "moves": 10, "gesture_ms": 15000, "http": 200, "captcha_button": "clicked", "ms": 30000},
+    {"seq": 1, "try": 2, "variant": "rotate_v2", "step": "solved", "angle": 12, "distance": 9, "requests": 2,
+     "moves": 10, "gesture_ms": 14000, "http": 200, "captcha_button": None, "ms": 25000},
+]
+
+
+def fake_solve_captcha(client, tab_id, *, report, **kwargs):
+    report.captchas.append({"seq": 1, "outcome": "solved", "at": 0, "attempts": [
+        {"try": 1, "type": "rotate", "variant": "v2", "result": "failed", "ms": 30000},
+        {"try": 2, "type": "rotate", "variant": "v2", "result": "solved", "ms": 25000},
+    ]})
+    report.diagnostics.extend(dict(d) for d in DIAGNOSTICS)
+    return "solved"
+
+
+def assert_captcha_lines_before_the_result(text):
+    lines = text.strip().splitlines()
+    assert lines[-1].startswith("CONSOLE_RESULT ")
+    captcha = [i for i, line in enumerate(lines) if line.startswith("captcha ")]
+    assert [lines[i].split(": ")[0] for i in captcha] == ["captcha 1.1", "captcha 1.2"]
+    assert captcha == [len(lines) - 3, len(lines) - 2]
+
+
+def test_main_prints_the_captcha_diagnostic_right_before_the_result(main_env):
+    _, author = add_item(main_env["store"])
+    main_env["page"].seed(author)
+    main_env["page"].captcha = [True]
+    main_env["monkeypatch"].setattr(tr, "solve_captcha", fake_solve_captcha)
+    code, text = run_main()
+    assert code == 0
+    assert_captcha_lines_before_the_result(text)
+
+
+def test_main_internal_error_still_prints_the_captcha_diagnostic(main_env):
+    def failing(**kw):
+        fake_solve_captcha(None, "tab-1", report=kw["report"])
+        raise LookupError("SENTINEL_TRACE")
+
+    main_env["monkeypatch"].setattr(tr, "run_reply", failing)
+    code, text = run_main()
+    assert code == 23
+    assert_captcha_lines_before_the_result(text)
+    assert "SENTINEL_TRACE" not in text
+
+
+def test_main_without_captcha_prints_no_captcha_line(main_env):
+    _, author = add_item(main_env["store"])
+    main_env["page"].seed(author)
+    code, text = run_main()
+    assert code == 0
+    assert not any(line.startswith("captcha ") for line in text.splitlines())
 
 
 def test_main_exception_outside_the_run_is_exit_23_class_only(main_env, capsys):

@@ -38,7 +38,17 @@ class TabsFull(PageError):
 
 
 class PageUnusable(PageError):
-    pass
+    """`args[0]` is a code of PAGE_UNUSABLE_CODES."""
+
+
+PAGE_UNUSABLE_CODES = (
+    "unexpected_snapshot",
+    "no_reply_button",
+    "no_reply_editor",
+    "no_dm_editor",
+    "no_send_button",
+    "dm_editor_not_empty",
+)
 
 
 class LoginGate(PageError):
@@ -258,6 +268,9 @@ class TikTokReplyPage:
         editor = self.thread_snapshot(tab).get("editor")
         if not isinstance(editor, dict):
             raise PageUnusable("no_dm_editor")
+        if normalize(editor.get("text")):
+            # s25 (s24 m5, console ADR 059, P7): a draft is never completed nor sent; nothing typed
+            raise PageUnusable("dm_editor_not_empty")
         self._type(tab, editor["selector"], text)
 
     def send_dm(self, tab: str) -> None:

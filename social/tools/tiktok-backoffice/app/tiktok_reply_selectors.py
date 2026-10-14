@@ -13,6 +13,10 @@ scripts/process_tiktok_review_one.py (anchors cited per script), rewritten as re
   send button `dm-new-send-btn` (l. 166-173), send error wording (l. 177);
 - inline "Reply" button and "Post" button of a comment (l. 196-209).
 
+Login gate (s25, s24 m2, console ADR 059, P6): a visible `a`, `button` or `[role="button"]` whose own text is exactly
+« Log in », « Sign up » or « Log in to comment » (case-insensitive), outside any user content (comments, replies, DM
+bubbles, editors) — never a regex on the page text, which a comment or a message could hold.
+
 Every script only READS the page and returns JSON: no click, no event, no value written, no « J’aime », no
 editing command. Each element the job must act on is returned with a unique CSS path computed from the DOM
 (`cssPath`), handed to `CamofoxClient.click_selector` / `type_text`, and with its rectangle centre (fallback of the
@@ -49,7 +53,7 @@ _HELPERS = r"""
   return parts.join(' > ');
  }
  function handle(el){if(!el)return null; const r=el.getBoundingClientRect(); return {selector:cssPath(el),x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}}
- function loginGate(){return /\bLog\s*in\b|Sign\s*up|Log\s*in\s+to\s+comment/i.test(document.body.innerText||'')}
+ function loginGate(){const words=['log in','sign up','log in to comment']; const user='[class*="DivCommentItemWrapper"],[class*="DivReplyContainer"],[data-e2e*="comment-level"],[data-e2e="chat-item"],[class*="DivChatItemWrapper"],textarea,[contenteditable],[role="textbox"]'; return Array.from(document.querySelectorAll('a,button,[role="button"]')).some(el=>vis(el)&&words.includes(clean(el.innerText||el.textContent).toLowerCase())&&!el.closest(user))}
  function authorFrom(el){const links=Array.from(el.querySelectorAll('a[href^="/@"], a[href*="tiktok.com/@"]')); for(const a of links){const h=a.getAttribute('href')||''; const m=h.match(/\/@([^/?#]+)/); if(m)return '@'+decodeURIComponent(m[1]); const t=clean(a.innerText||a.textContent); if(t&&!t.includes(' '))return t.startsWith('@')?t:'@'+t} return null}
  function commentTextFrom(container){const content=container.querySelector('[class*="DivCommentContentWrapper"]')||container; const user=clean((content.querySelector('[data-e2e*="comment-username"], [class*="DivUsernameContentWrapper"]')||{}).innerText||''); let txt=clean(content.innerText||content.textContent); if(user&&txt.startsWith(user))txt=clean(txt.slice(user.length)); return clean(txt.replace(/\s+(?:\d+[smhdw]|\d+-\d+|Yesterday|Today)\s+ago\s+Reply(?:\s+\d+)?(?:\s+View\s+\d+\s+repl(?:y|ies))?\s*$/i,'').replace(/\s+Reply(?:\s+\d+)?(?:\s+View\s+\d+\s+repl(?:y|ies))?\s*$/i,'').replace(/\s+View\s+\d+\s+repl(?:y|ies)\s*$/i,'').replace(/\s+\d{1,2}-\d{1,2}\s*$/i,''));}
  function editors(root){return Array.from((root||document).querySelectorAll('textarea,[contenteditable="true"],div[contenteditable],[role="textbox"]')).filter(vis)}

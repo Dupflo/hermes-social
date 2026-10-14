@@ -524,6 +524,47 @@ def test_solver_budget_is_per_run(tmp_path):
     assert second == pytest.approx(clock.t - 300 + 40)
 
 
+def test_video_with_the_solver_spending_its_budget_stays_under_the_legacy_bound(tmp_path):
+    # s25 (console ADR 059, P4, s23 n1): the solver hands back by its deadline, so a video's worst case is its
+    # 240 s deadline + one try in flight + list_tabs + PRESENT_JS probe + delete_tab + the run's 240 s of solver,
+    # without any solver overrun. Real solver, every Camofox / SadCaptcha call consuming its maximal delay.
+    import random
+
+    from app.captcha_solver import solve_captcha
+    from test_captcha_solver import KEY as SOLVER_KEY
+    from test_captcha_solver import Clock as SolverClock
+    from test_captcha_solver import SlowCamofox, SlowSad
+
+    store = make_store(tmp_path, videos=1, items=0)
+    clock = SolverClock()
+    report = CaptchaReport()
+    client = SlowCamofox("rotate_v2", clock, verdicts=[[True]] * 3)
+    sad = SlowSad(clock)
+    spent = []
+
+    def solve(tab_id, *, deadline):
+        client.deadline = sad.deadline = deadline
+        began = clock()
+        outcome = solve_captcha(client, tab_id, api_key=SOLVER_KEY, report=report, clock=clock, sleep=clock.sleep,
+                                rng=random.Random(1), deadline=deadline, sadcaptcha=sad)
+        spent.append(clock() - began)
+        assert clock() <= deadline
+        return outcome
+
+    in_flight = 92 + 10 + 30 + 10  # one fetch try, list_tabs, PRESENT_JS probe, delete_tab
+
+    def script(url, on_captcha, expired, clk):
+        clock.t += ts.VIDEO_DEADLINE_S - 1
+        solved = on_captcha("tab-1")
+        clock.t += in_flight
+        return ok_fetch() if solved else {"ok": False, "error": "captcha_unsolved", "comments": []}
+
+    start = clock()
+    run(store, clock=clock, fetch=Fetch(clock, script=script), solve=solve, report=report)
+    assert spent and spent[0] <= ts.SOLVER_BUDGET_S
+    assert clock() - start <= ts.LEGACY_VIDEO_BOUND_S
+
+
 # --- legacy cron guards ---------------------------------------------------------------------------------------------
 
 
@@ -778,6 +819,69 @@ def test_main_internal_error_is_exit_19_class_only(main_env, capsys):
     assert payload["reason"] == "internal" and set(payload["counters"]) == set(ts.COUNTERS)
     assert "SENTINEL_TRACE" not in text
     assert KEY not in text + "".join(capsys.readouterr())
+
+
+
+DIAGNOSTICS = [
+    {"seq": 1, "try": 1, "variant": "rotate_v2", "step": "not_gone", "angle": 137, "distance": 105, "requests": 2,
+     "moves": 10, "gesture_ms": 15000, "http": 200, "captcha_button": "clicked", "ms": 30000},
+    {"seq": 1, "try": 2, "variant": "rotate_v2", "step": "solved", "angle": 12, "distance": 9, "requests": 2,
+     "moves": 10, "gesture_ms": 14000, "http": 200, "captcha_button": None, "ms": 25000},
+]
+
+
+def fake_solve_captcha(client, tab_id, *, report, **kwargs):
+    report.captchas.append({"seq": 1, "outcome": "solved", "at": 0, "attempts": [
+        {"try": 1, "type": "rotate", "variant": "v2", "result": "failed", "ms": 30000},
+        {"try": 2, "type": "rotate", "variant": "v2", "result": "solved", "ms": 25000},
+    ]})
+    report.diagnostics.extend(dict(d) for d in DIAGNOSTICS)
+    return "solved"
+
+
+def assert_captcha_lines_before_the_result(text):
+    lines = text.strip().splitlines()
+    assert lines[-1].startswith("CONSOLE_RESULT ")
+    captcha = [i for i, line in enumerate(lines) if line.startswith("captcha ")]
+    assert [lines[i].split(": ")[0] for i in captcha] == ["captcha 1.1", "captcha 1.2"]
+    assert captcha == [len(lines) - 3, len(lines) - 2]
+
+
+def test_main_prints_the_captcha_diagnostic_right_before_the_result(main_env):
+    main_env["monkeypatch"].setattr(ts, "solve_captcha", fake_solve_captcha)
+
+    seen = []
+
+    def fetch(**kwargs):
+        if not seen:  # one captcha, on the first video only
+            seen.append(1)
+            assert kwargs["on_captcha"]("tab-1")
+        return ok_fetch()
+
+    main_env["monkeypatch"].setattr(ts, "fetch_comments_from_camofox", fetch)
+    code, text = run_main()
+    assert code == 0
+    assert_captcha_lines_before_the_result(text)
+
+
+def test_main_internal_error_still_prints_the_captcha_diagnostic(main_env):
+    main_env["monkeypatch"].setattr(ts, "solve_captcha", fake_solve_captcha)
+
+    def failing(**kw):
+        kw["solve"]("tab-1", deadline=0.0)
+        raise RuntimeError("SENTINEL_TRACE")
+
+    main_env["monkeypatch"].setattr(ts, "run_scan", failing)
+    code, text = run_main()
+    assert code == 19
+    assert_captcha_lines_before_the_result(text)
+    assert "SENTINEL_TRACE" not in text
+
+
+def test_main_without_captcha_prints_no_captcha_line(main_env):
+    code, text = run_main()
+    assert code == 0
+    assert not any(line.startswith("captcha ") for line in text.splitlines())
 
 
 def test_main_check_only_reads_without_fetch(main_env, capsys):

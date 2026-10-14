@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, TextIO
 
 from app.camofox_reader import CamofoxClient, CamofoxError, fetch_comments_from_camofox
-from app.captcha_solver import CaptchaReport, solve_captcha
+from app.captcha_solver import CaptchaReport, diagnostic_lines, solve_captcha
 from app.config import Settings
 from app.store import TikTokBackofficeStore
 
@@ -56,8 +56,9 @@ LEGACY_MARKER = "tiktok_cron_auto_dm"
 LEGACY_CRON_ID = "bf85146a1ae8"
 LEGACY_JOBS_JSON = "/opt/data/cron/jobs.json"
 # Worst case of one video (review n°1 m1): its 240 s deadline + one try in flight (~92 s) + list_tabs (10 s) +
-# PRESENT_JS probe (30 s) + delete_tab (10 s) = ~382 s, plus the run's 240 s of solver and one solver try's overrun
-# (MIN_TRY_BUDGET_S 60) ≈ 682 s, bounded by 240 + 240 + 220 = 700 s.
+# PRESENT_JS probe (30 s) + delete_tab (10 s) = ~382 s, plus the run's 240 s of solver = ~622 s, bounded by
+# 240 + 240 + 220 = 700 s. s25 (console ADR 059, s23 n1): the solver hands back by its deadline (every step only
+# starts with its own bound left), so there is no solver overrun term any more; 700 s is kept as the margin.
 LEGACY_VIDEO_BOUND_S = VIDEO_DEADLINE_S + SOLVER_BUDGET_S + 220
 
 EXIT_SCAN_FAILED = 17
@@ -423,6 +424,8 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ,
         raise
     except BaseException as exc:  # noqa: BLE001 - class name only, never the message
         emit(f"tiktok-scan: error=internal class={type(exc).__name__}")
+        for line in diagnostic_lines(report):
+            emit(line)
         counters = {name: 0 for name in COUNTERS}
         counters.update(_captcha_counters(report))
         payload: dict[str, Any] = {"status": "ok", "reason": "internal", "counters": counters, "videos": []}
@@ -432,6 +435,8 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] = os.environ,
         return EXIT_INTERNAL
 
     for line in emit_lines(result):
+        emit(line)
+    for line in diagnostic_lines(report):  # s25 (console ADR 059): right before CONSOLE_RESULT, still the last line
         emit(line)
     emit(console_result_line(result, report))
     return result.exit_code

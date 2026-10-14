@@ -78,6 +78,16 @@ _HELPERS = (
 
 PRESENT_JS = "(() => {" + _HELPERS + f" return any({json.dumps(WRAPPER_V1 + ', ' + WRAPPER_V2)});" + " })()"
 
+# s25 (console ADR 059): rectangle {x, y, width, height} of the first VISIBLE REFRESH_BUTTON, or null. Read again
+# right before the solver clicks it through the console-mouse plugin: never a stale element, never a JS click.
+REFRESH_JS = (
+    "(() => {"
+    + _HELPERS
+    + f" const el = first({json.dumps(REFRESH_BUTTON)}); if (!el) return null; const r = el.getBoundingClientRect();"
+    " return { x: r.x, y: r.y, width: r.width, height: r.height };"
+    " })()"
+)
+
 FACTS_JS = (
     "(() => {"
     + _HELPERS
