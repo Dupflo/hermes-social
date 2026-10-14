@@ -1,0 +1,22 @@
+{
+  "description": "s30 (A2): new conversation, no bubble recognised; the text appeared in the conversation column, the editor is empty.",
+  "dm_text": "Salut !\nVoici le lien : http://ex.am/ple",
+  "thread": {
+    "login_gate": false,
+    "editor": {
+      "selector": "html > body > div:nth-of-type(3)",
+      "x": 900,
+      "y": 800,
+      "text": ""
+    },
+    "outgoing": [],
+    "send_button": null,
+    "error": false,
+    "conversation": "Fan Name Salut ! Voici le lien : http://ex.am/ple Seen"
+  },
+  "expected": {
+    "dm_present": false,
+    "dm_verified": true,
+    "dm_already_there": true
+  }
+}

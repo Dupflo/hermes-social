@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import signal
 import sqlite3
 import time
@@ -118,6 +119,11 @@ class FakePage:
         self.fail = {}  # step -> exception (raised once)
         self.hooks = {}  # step -> callable run at the step
         self.typed = {}
+        # s30 (console ADR 064): conversation column text per handle, scripted `dm_probe` records
+        self.conversations = {}
+        self.probe_profile = {"captcha": False, "candidates": 1, "chosen": "text", "tag": "BUTTON"}
+        self.probe_thread = {"attempt": 1, "editor": True, "polls": 2}
+        self.probe = []
 
     def seed(self, author, text="proxy stp", replies=()):
         self.comments[author] = {"text": text, "replies": [{"author": a, "text": t} for a, t in replies]}
@@ -149,20 +155,33 @@ class FakePage:
             for a, c in self.comments.items()
         ]}
 
-    def open_dm(self, handle):
+    def open_dm(self, handle, *, captcha_gate):
         self._step("open_dm", handle)
+        self.probe = [("profile", dict(self.probe_profile))]
+        captcha_gate("dm-tab")  # s30: the captcha gate comes before the profile is read
         if self.login_gate:
             raise trp.LoginGate("login_gate")
         if handle in self.no_message:
             raise trp.DmUnavailable("dm_unavailable")
         self.current = handle
         self.threads.setdefault(handle, [])
+        self.probe.append(("thread", dict(self.probe_thread)))
         return "dm-tab"
 
     def thread_snapshot(self, tab):
         self._step("thread_snapshot")
         return {"editor": {"selector": "ED", "text": self.typed.get(self.current, "")}, "outgoing": list(self.threads[self.current]),
-                "send_button": {"selector": "S"}, "error": False}
+                "send_button": {"selector": "S"}, "error": False, "conversation": self.conversations.get(self.current, "")}
+
+    def verify_dm(self, tab, text):
+        self._step("verify_dm")
+        ok = trp.dm_verified(self.thread_snapshot(tab), text)  # through thread_snapshot: the hooks stay
+        self.probe.append(("verify", {"verified": ok, "polls": 1}))
+        return ok
+
+    def take_dm_probe(self):
+        probe, self.probe = self.probe, []
+        return probe
 
     def type_dm(self, tab, text):
         self._step("type_dm", text)
@@ -894,6 +913,126 @@ def test_item_deadline_before_any_action_releases_the_item_and_goes_on(tmp_path)
     assert result.status == "ok" and result.counters["items_released"] == 1
 
 
+# --- s30 (console ADR 064): DM path at run level -----------------------------------------------------------------
+
+PROBE_LINE = re.compile(r"^dm_probe item=\d+ step=(profile|thread|verify)(?: [a-z0-9_]+=[A-Za-z0-9_-]{1,40})+$")
+
+
+@pytest.mark.parametrize("code", ["no_dm_editor", "no_dm_button"])
+def test_s30_no_dm_editor_or_button_releases_the_item_exit_21_with_its_page_code(tmp_path, code):
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.fail["open_dm"] = trp.PageUnusable(code)
+    result = run(store, page)
+    assert (result.status, result.exit_code) == ("failed", 21)
+    assert item_row(store, rid) == ("pending_review", None)
+    assert outbound(store) == [] and page.sends() == []
+    assert f"item {rid}: outcome=released dm=- reply=- page={code}" in tr.emit_lines(result)
+
+
+def test_s30_r1_conversation_already_holding_the_dm_types_nothing(tmp_path):
+    # manual replay of a not_verified item whose DM went: no bubble recognised, no `sent` row, the conversation holds it
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.conversations[author] = "Fan " + DM.replace("\n", " ") + " Seen"
+    result = run(store, page)
+    assert "type_dm" not in page.names() and "send_dm" not in page.names()
+    assert result.items[0] == {"id": rid, "outcome": "posted", "dm": "present", "reply": "sent"}
+    assert [r["message_type"] for r in outbound(store)] == ["public_reply"]
+
+
+def test_s30_captcha_on_the_profile_unsolved_releases_exit_22(tmp_path):
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.captcha = [False, True]  # the video, then the profile (captcha gate of open_dm)
+    report = CaptchaReport()
+    solver = Solver(report, ["unsolved"])
+    result = run(store, page, solve=solver, report=report)
+    assert (result.status, result.exit_code) == ("failed", 22)
+    assert item_row(store, rid) == ("pending_review", None)
+    assert page.sends() == [] and "type_dm" not in page.names()
+    assert [c[0] for c in solver.calls] == ["dm-tab"]
+    lines = tr.emit_lines(result)
+    assert any(line.startswith(f"dm_probe item={rid} step=profile ") for line in lines)
+
+
+def test_s30_captcha_on_the_profile_solved_goes_on(tmp_path):
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.captcha = [False, True]
+    report = CaptchaReport()
+    result = run(store, page, solve=Solver(report, ["solved"]), report=report)
+    assert item_row(store, rid) == ("posted", None)
+    assert result.items[0]["dm"] == "sent"
+
+
+def test_s30_unconfirmed_dm_is_sent_once_and_never_replayed(tmp_path):
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    _, author2 = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.seed(author2)
+    page.dm_lands = False
+    result = run(store, page)
+    assert [c for c in page.calls if c[0] == "send_dm"] == [("send_dm", author), ("send_dm", author2)]
+    assert page.names().count("verify_dm") == 2
+    assert item_row(store, rid) == ("failed", "not_verified")
+    assert [(r["source_id"], r["status"]) for r in outbound(store)][0] == (str(rid), "failed")
+    assert result.exit_code == 0 and result.counters["items_failed"] == 2
+
+
+def test_s30_dm_probe_lines_follow_their_item_line_in_order_and_stay_out_of_console_result(tmp_path):
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    report = CaptchaReport()
+    result = run(store, page, report=report)
+    lines = tr.emit_lines(result)
+    at = lines.index(f"item {rid}: outcome=posted dm=sent reply=sent")
+    probe = lines[at + 1:at + 4]
+    assert [line.split()[2] for line in probe] == ["step=profile", "step=thread", "step=verify"]
+    assert all(PROBE_LINE.match(line) for line in probe), probe
+    assert all(line.startswith(f"dm_probe item={rid} ") for line in probe)
+    assert len([line for line in lines if line.startswith("dm_probe ")]) == 3
+    payload = tr.console_result_line(result, report)
+    assert "dm_probe" not in payload
+    assert json.loads(payload[len("CONSOLE_RESULT "):])["items"] == [
+        {"id": rid, "outcome": "posted", "dm": "sent", "reply": "sent"}]
+    assert tr.ITEM_KEYS == ("id", "outcome", "dm", "reply")
+
+
+def test_s30_dm_probe_lines_kept_for_an_item_released_by_a_stop(tmp_path):
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    page = FakePage()
+    page.seed(author)
+    page.fail["type_dm"] = trp.PageUnusable("dm_editor_not_empty")
+    result = run(store, page)
+    lines = tr.emit_lines(result)
+    at = lines.index(f"item {rid}: outcome=released dm=- reply=- page=dm_editor_not_empty")
+    assert [line.split()[2] for line in lines[at + 1:at + 3]] == ["step=profile", "step=thread"]
+
+
+def test_s30_no_dm_probe_line_without_a_dm_path(tmp_path):
+    store = make_store(tmp_path)
+    rid, author = add_item(store)
+    store.record_outbound(review_id=rid, recipient=author, message_type="private_reply", text=DM, status="sent")
+    page = FakePage()
+    page.seed(author)
+    result = run(store, page)
+    assert not any(line.startswith("dm_probe ") for line in tr.emit_lines(result))
+
+
 # --- D4 and hygiene -------------------------------------------------------------------------------------------------
 
 
@@ -914,6 +1053,10 @@ def test_output_never_carries_private_data(tmp_path):
     page.seed("@SENTINEL_AUTHOR2", "SENTINEL_COMMENT")
     page.hooks["open_dm"] = lambda: None
     page.fail["post_reply"] = None
+    # s30 (console ADR 064, D1): a probe whose values would carry private data prints `other`, a foreign key nothing
+    page.probe_profile = {"e2e": "@SENTINEL_PROBE_HANDLE", "cls": "Salut SENTINEL_PROBE_TEXT",
+                          "tag": "/@SENTINEL_PROBE_URL/video/7212345678", "role": "chat-7212345",
+                          "handle": "SENTINEL_PROBE_KEY"}
     seq = {"n": 0}
 
     def fail_second():
@@ -924,8 +1067,10 @@ def test_output_never_carries_private_data(tmp_path):
     page.hooks["comment_snapshot"] = fail_second
     result = run(store, page)
     text = output_of(result)
-    for sentinel in ("SENTINEL_AUTHOR", "SENTINEL_COMMENT", "SENTINEL_DM", "SENTINEL_REPLY", "SENTINEL_URL", "SENTINEL_TRACE"):
+    for sentinel in ("SENTINEL_AUTHOR", "SENTINEL_COMMENT", "SENTINEL_DM", "SENTINEL_REPLY", "SENTINEL_URL", "SENTINEL_TRACE",
+                     "SENTINEL_PROBE", "7212345"):
         assert sentinel not in text
+    assert any(line.startswith(f"dm_probe item={rid} step=profile ") for line in text.splitlines())
     assert text.splitlines()[-1].startswith("CONSOLE_RESULT ")
 
 

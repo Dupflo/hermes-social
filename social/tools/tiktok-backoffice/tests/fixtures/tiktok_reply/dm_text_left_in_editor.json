@@ -1,0 +1,22 @@
+{
+  "description": "s30 (D4): the text is still in the editor, the conversation does not hold it.",
+  "dm_text": "Salut !\nVoici le lien : http://ex.am/ple",
+  "thread": {
+    "login_gate": false,
+    "editor": {
+      "selector": "html > body > div:nth-of-type(3)",
+      "x": 900,
+      "y": 800,
+      "text": "Salut ! Voici le lien : http://ex.am/ple"
+    },
+    "outgoing": [],
+    "send_button": null,
+    "error": false,
+    "conversation": "Fan Name ancien"
+  },
+  "expected": {
+    "dm_present": false,
+    "dm_verified": false,
+    "dm_already_there": false
+  }
+}
